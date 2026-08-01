@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "customer",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "customer", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "driver",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "driver", "dev"],
+      "port": 3001
+    }
+  ]
+}

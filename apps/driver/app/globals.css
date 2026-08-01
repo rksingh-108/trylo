@@ -1,0 +1,16 @@
+@import "@trylo/design-tokens/css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Driver app primary = Transit Teal (operational/on-duty) */
+  --primary: 175 82% 26%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 175 82% 26%;
+}
+
+body {
+  @apply bg-background text-foreground font-body antialiased;
+}
