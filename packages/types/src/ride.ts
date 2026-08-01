@@ -14,6 +14,11 @@ export interface RideLocation {
   point: GeoPoint;
 }
 
+export interface RiderSummary {
+  name: string;
+  rating: number;
+}
+
 export interface Ride {
   id: string;
   status: RideStatus;
@@ -24,6 +29,8 @@ export interface Ride {
   /** Expanded driver details, populated once the ride is matched. */
   driver?: Driver;
   riderId: string;
+  /** Expanded rider details, shown to the driver on requests and active rides. */
+  rider?: RiderSummary;
   fare: FareBreakdown;
   otp: string;
   distanceKm: number;

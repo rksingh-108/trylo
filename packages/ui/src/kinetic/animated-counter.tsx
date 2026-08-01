@@ -23,7 +23,13 @@ export function AnimatedCounter({ value, prefix = "", decimals = 0, className, d
       onUpdate: (v) => setDisplay(v),
     });
     prevValue.current = value;
-    return () => controls.stop();
+    // requestAnimationFrame-driven updates can stall (throttled/backgrounded tabs), so
+    // guarantee the displayed value is eventually correct even if onUpdate never fires.
+    const fallback = setTimeout(() => setDisplay(value), durationSec * 1000 + 100);
+    return () => {
+      controls.stop();
+      clearTimeout(fallback);
+    };
   }, [value, durationSec]);
 
   return (

@@ -10,6 +10,7 @@ export * from "./components/progress";
 export * from "./components/skeleton";
 export * from "./components/dialog";
 export * from "./components/sheet";
+export * from "./components/switch";
 export * from "./components/tabs";
 export * from "./components/otp-input";
 

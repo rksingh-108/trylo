@@ -6,6 +6,15 @@ import { driverDb } from "../store";
 const REQUEST_APPEAR_AFTER_MS = 4000;
 const REQUEST_EXPIRES_AFTER_MS = 15000;
 
+const RIDER_NAMES = [
+  "Aditi Sharma",
+  "Rohan Mehta",
+  "Sneha Reddy",
+  "Kabir Malhotra",
+  "Priya Nair",
+  "Arjun Iyer",
+];
+
 function generateIncomingRequest(): Ride {
   const vehicleType = driverDb.driver?.vehicle.type ?? "bike";
   const pickup = addressSuggestions[Math.floor(Math.random() * addressSuggestions.length)]!;
@@ -19,6 +28,10 @@ function generateIncomingRequest(): Ride {
     pickup: { address: pickup.primaryText, point: pickup.point },
     drop: { address: drop.primaryText, point: drop.point },
     riderId: randomId("rider"),
+    rider: {
+      name: RIDER_NAMES[Math.floor(Math.random() * RIDER_NAMES.length)]!,
+      rating: Math.round((4 + Math.random()) * 10) / 10,
+    },
     fare,
     otp: String(Math.floor(1000 + Math.random() * 8999)),
     distanceKm: Math.round((1 + Math.random() * 6) * 10) / 10,
@@ -27,8 +40,13 @@ function generateIncomingRequest(): Ride {
   };
 }
 
+export interface IncomingRequestOffer {
+  ride: Ride;
+  expiresAt: string;
+}
+
 /** Polled from the dashboard while online — simulates a ride request arriving, then expiring if unanswered. */
-export async function getIncomingRequest(): Promise<Ride | null> {
+export async function getIncomingRequest(): Promise<IncomingRequestOffer | null> {
   if (!driverDb.isOnline || driverDb.activeRide) {
     return networkDelay(null, 150, 300);
   }
@@ -37,8 +55,9 @@ export async function getIncomingRequest(): Promise<Ride | null> {
     if (Date.now() > new Date(driverDb.incomingRequestExpiresAt).getTime()) {
       driverDb.incomingRequest = null;
       driverDb.incomingRequestExpiresAt = null;
+      return networkDelay(null, 150, 300);
     }
-    return networkDelay(driverDb.incomingRequest, 150, 300);
+    return networkDelay({ ride: driverDb.incomingRequest, expiresAt: driverDb.incomingRequestExpiresAt }, 150, 300);
   }
 
   const onlineElapsed = driverDb.onlineSince
@@ -47,8 +66,9 @@ export async function getIncomingRequest(): Promise<Ride | null> {
   if (onlineElapsed >= REQUEST_APPEAR_AFTER_MS) {
     driverDb.incomingRequest = generateIncomingRequest();
     driverDb.incomingRequestExpiresAt = new Date(Date.now() + REQUEST_EXPIRES_AFTER_MS).toISOString();
+    return networkDelay({ ride: driverDb.incomingRequest, expiresAt: driverDb.incomingRequestExpiresAt }, 150, 300);
   }
-  return networkDelay(driverDb.incomingRequest, 150, 300);
+  return networkDelay(null, 150, 300);
 }
 
 export async function acceptRideRequest(rideId: string): Promise<Ride | null> {
