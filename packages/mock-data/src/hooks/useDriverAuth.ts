@@ -49,6 +49,7 @@ export function useKycDocuments() {
       const hasPending = docs?.some((d) => d.status === "pending_review");
       return hasPending ? 1500 : false;
     },
+    refetchIntervalInBackground: true,
   });
 }
 
@@ -68,5 +69,6 @@ export function useVerificationStatus() {
     queryKey: queryKeys.verificationStatus,
     queryFn: driverAuthService.getVerificationStatus,
     refetchInterval: (query) => (query.state.data === "verified" ? false : 2000),
+    refetchIntervalInBackground: true,
   });
 }

@@ -11,6 +11,7 @@ export function useIncomingRequest(enabled: boolean) {
     queryFn: driverRideService.getIncomingRequest,
     enabled,
     refetchInterval: enabled ? 1500 : false,
+    refetchIntervalInBackground: true,
   });
 }
 
@@ -46,6 +47,7 @@ export function useActiveDriverRide() {
       if (!ride || TERMINAL_STATUSES.includes(ride.status)) return false;
       return 2000;
     },
+    refetchIntervalInBackground: true,
   });
 }
 

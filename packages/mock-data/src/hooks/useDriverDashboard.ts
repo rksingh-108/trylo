@@ -9,6 +9,7 @@ export function useDashboardSummary() {
     queryKey: queryKeys.dashboardSummary,
     queryFn: driverDashboardService.getDashboardSummary,
     refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
   });
 }
 

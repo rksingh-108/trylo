@@ -36,6 +36,7 @@ export function useRideStatus(rideId: string | null) {
       if (!ride || TERMINAL_STATUSES.includes(ride.status)) return false;
       return 1000;
     },
+    refetchIntervalInBackground: true,
   });
 }
 
