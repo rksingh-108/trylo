@@ -1,6 +1,5 @@
-import type { FareEstimate, GeoPoint, VehicleType } from "@trylo/types";
-import { networkDelay } from "../latency";
-import { computeFare, fareRates, haversineKm, promoCodes } from "../seed";
+import type { FareEstimate, GeoPoint, PromoCode } from "@trylo/types";
+import { apiClient } from "../apiClient";
 
 export interface FareEstimateRequest {
   pickup: GeoPoint;
@@ -9,28 +8,15 @@ export interface FareEstimateRequest {
 }
 
 export async function getFareEstimates(req: FareEstimateRequest): Promise<FareEstimate[]> {
-  const distanceKm = Math.max(0.8, haversineKm(req.pickup, req.drop));
-  const promo = req.promoCode
-    ? promoCodes.find((p) => p.code.toLowerCase() === req.promoCode!.toLowerCase())
-    : undefined;
-
-  const estimates: FareEstimate[] = (Object.keys(fareRates) as VehicleType[]).map((vehicleType) => {
-    const rate = fareRates[vehicleType];
-    const { fare, etaMinutes } = computeFare(vehicleType, distanceKm, promo);
-    return {
-      vehicleType,
-      fare,
-      etaMinutes,
-      capacity: rate.capacity,
-      label: rate.label,
-      description: rate.description,
-    };
+  return apiClient.get<FareEstimate[]>("/api/customer/fares/estimates", {
+    pickupLat: req.pickup.lat,
+    pickupLng: req.pickup.lng,
+    dropLat: req.drop.lat,
+    dropLng: req.drop.lng,
+    promoCode: req.promoCode,
   });
-
-  return networkDelay(estimates);
 }
 
-export async function validatePromoCode(code: string) {
-  const promo = promoCodes.find((p) => p.code.toLowerCase() === code.toLowerCase());
-  return networkDelay(promo ?? null, 200, 450);
+export async function validatePromoCode(code: string): Promise<PromoCode | null> {
+  return apiClient.get<PromoCode | null>("/api/customer/fares/promo/validate", { code });
 }

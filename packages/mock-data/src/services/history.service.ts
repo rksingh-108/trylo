@@ -1,12 +1,10 @@
 import type { Ride } from "@trylo/types";
-import { networkDelay } from "../latency";
-import { customerDb } from "../store";
+import { apiClient } from "../apiClient";
 
 export async function getRideHistory(): Promise<Ride[]> {
-  return networkDelay([...customerDb.rideHistory]);
+  return apiClient.get<Ride[]>("/api/customer/rides/history");
 }
 
 export async function getRideDetail(rideId: string): Promise<Ride | null> {
-  const ride = customerDb.rideHistory.find((r) => r.id === rideId) ?? null;
-  return networkDelay(ride);
+  return apiClient.get<Ride | null>(`/api/customer/rides/history/${rideId}`);
 }

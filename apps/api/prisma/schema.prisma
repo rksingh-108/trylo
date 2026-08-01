@@ -1,0 +1,240 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum VehicleType {
+  bike
+  auto
+  cab
+}
+
+enum RideStatus {
+  requested
+  matched
+  arriving
+  in_progress
+  completed
+  cancelled
+}
+
+enum DriverVerificationStatus {
+  pending
+  verified
+  rejected
+}
+
+enum KycDocType {
+  license
+  rc
+  insurance
+  profile_photo
+}
+
+enum KycStatus {
+  not_uploaded
+  pending_review
+  verified
+  rejected
+}
+
+enum PaymentMethodType {
+  upi
+  card
+  cash
+}
+
+enum SavedPlaceLabel {
+  home
+  work
+  other
+}
+
+enum WalletTxnType {
+  credit
+  debit
+}
+
+enum WalletTxnCategory {
+  ride
+  top_up
+  refund
+  payout
+  bonus
+}
+
+enum PayoutStatus {
+  processed
+  pending
+  failed
+}
+
+enum OtpPurpose {
+  customer
+  driver
+}
+
+model User {
+  id            String   @id @default(cuid())
+  phone         String   @unique
+  name          String   @default("")
+  email         String?
+  rating        Float    @default(5)
+  walletBalance Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  rides            Ride[]
+  savedPlaces      SavedPlace[]
+  paymentMethods   PaymentMethod[]
+  walletTxns       WalletTransaction[]
+}
+
+model Driver {
+  id                  String                    @id @default(cuid())
+  phone               String                    @unique
+  name                String                    @default("")
+  rating              Float                     @default(5)
+  totalRides          Int                       @default(0)
+  vehicleType         VehicleType               @default(bike)
+  make                String                    @default("")
+  model               String                    @default("")
+  registrationNumber  String                    @default("")
+  color               String                    @default("")
+  verificationStatus  DriverVerificationStatus  @default(pending)
+  isOnline            Boolean                   @default(false)
+  onlineSince         DateTime?
+  lat                 Float
+  lng                 Float
+  createdAt           DateTime                  @default(now())
+
+  kycDocuments  KycDocument[]
+  rides         Ride[]
+  payouts       PayoutRecord[]
+}
+
+model KycDocument {
+  id         String    @id @default(cuid())
+  driverId   String
+  driver     Driver    @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  type       KycDocType
+  label      String
+  status     KycStatus @default(not_uploaded)
+  fileName   String?
+  uploadedAt DateTime?
+
+  @@index([driverId])
+}
+
+model Ride {
+  id        String      @id @default(cuid())
+  status    RideStatus  @default(requested)
+
+  vehicleType   VehicleType
+  pickupAddress String
+  pickupLat     Float
+  pickupLng     Float
+  dropAddress   String
+  dropLat       Float
+  dropLng       Float
+
+  riderId  String
+  rider    User    @relation(fields: [riderId], references: [id])
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+
+  otp String
+
+  fareBase          Int
+  fareDistance      Int
+  fareTime          Int
+  fareSurge         Int      @default(0)
+  farePromoDiscount Int      @default(0)
+  fareTotal         Int
+
+  distanceKm Float
+  durationMin Int
+
+  requestedAt     DateTime  @default(now())
+  offerExpiresAt  DateTime?
+  excludedDriverIds String[] @default([])
+
+  acceptedAt  DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+  cancelReason String?
+
+  rating Int?
+  tip    Int?
+
+  @@index([riderId])
+  @@index([driverId])
+  @@index([status])
+}
+
+model SavedPlace {
+  id      String          @id @default(cuid())
+  userId  String
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label   SavedPlaceLabel
+  name    String
+  address String
+  lat     Float
+  lng     Float
+
+  @@index([userId])
+}
+
+model PaymentMethod {
+  id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      PaymentMethodType
+  label     String
+  detail    String
+  isDefault Boolean           @default(false)
+
+  @@index([userId])
+}
+
+model WalletTransaction {
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        WalletTxnType
+  category    WalletTxnCategory
+  amount      Int
+  description String
+  createdAt   DateTime          @default(now())
+
+  @@index([userId])
+}
+
+model PayoutRecord {
+  id                 String       @id @default(cuid())
+  driverId           String
+  driver             Driver       @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  amount             Int
+  status             PayoutStatus @default(processed)
+  bankAccountLast4   String
+  initiatedAt        DateTime     @default(now())
+  processedAt        DateTime?
+
+  @@index([driverId])
+}
+
+model OtpChallenge {
+  id        String     @id @default(cuid())
+  phone     String
+  purpose   OtpPurpose
+  code      String
+  expiresAt DateTime
+  consumed  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+
+  @@index([phone, purpose])
+}

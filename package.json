@@ -9,6 +9,10 @@
     "dev": "turbo run dev",
     "dev:customer": "turbo run dev --filter=customer",
     "dev:driver": "turbo run dev --filter=driver",
+    "dev:api": "turbo run dev --filter=api",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter api prisma:migrate",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "check-types": "turbo run check-types"

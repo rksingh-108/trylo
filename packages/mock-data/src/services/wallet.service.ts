@@ -1,21 +1,10 @@
-import type { Wallet, WalletTransaction } from "@trylo/types";
-import { networkDelay, randomId } from "../latency";
-import { customerDb } from "../store";
+import type { Wallet } from "@trylo/types";
+import { apiClient } from "../apiClient";
 
 export async function getWallet(): Promise<Wallet> {
-  return networkDelay({ ...customerDb.wallet, transactions: [...customerDb.wallet.transactions] });
+  return apiClient.get<Wallet>("/api/customer/wallet");
 }
 
 export async function topUpWallet(amount: number): Promise<Wallet> {
-  const txn: WalletTransaction = {
-    id: randomId("txn"),
-    type: "credit",
-    category: "top_up",
-    amount,
-    description: "Added money via UPI",
-    createdAt: new Date().toISOString(),
-  };
-  customerDb.wallet.balance += amount;
-  customerDb.wallet.transactions.unshift(txn);
-  return networkDelay({ ...customerDb.wallet, transactions: [...customerDb.wallet.transactions] }, 400, 800);
+  return apiClient.post<Wallet>("/api/customer/wallet/topup", { amount });
 }

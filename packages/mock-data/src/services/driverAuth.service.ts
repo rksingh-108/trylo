@@ -1,9 +1,6 @@
-import type { Driver, KycDocument, Vehicle, VehicleType } from "@trylo/types";
-import { networkDelay, randomId } from "../latency";
-import { CITY_CENTER } from "../seed";
-import { driverDb } from "../store";
-
-const DEMO_OTP = "1234";
+import type { Driver, KycDocument, VehicleType } from "@trylo/types";
+import { apiClient } from "../apiClient";
+import { getToken, setToken } from "../tokenStore";
 
 export interface DriverOtpRequestResult {
   requestId: string;
@@ -11,7 +8,7 @@ export interface DriverOtpRequestResult {
 }
 
 export async function requestDriverOtp(phone: string): Promise<DriverOtpRequestResult> {
-  return networkDelay({ requestId: randomId("otpreq"), devHintOtp: DEMO_OTP });
+  return apiClient.post<DriverOtpRequestResult>("/api/driver/auth/otp/request", { phone });
 }
 
 export interface VerifyDriverOtpResult {
@@ -21,24 +18,14 @@ export interface VerifyDriverOtpResult {
 }
 
 export async function verifyDriverOtp(phone: string, otp: string): Promise<VerifyDriverOtpResult> {
-  const success = otp === DEMO_OTP;
-  if (!success) return networkDelay({ success: false, isNewDriver: false, driver: null });
-
-  const isNewDriver = !driverDb.driver;
-  if (isNewDriver) {
-    driverDb.driver = {
-      id: randomId("drv"),
-      name: "",
-      phone,
-      rating: 5,
-      totalRides: 0,
-      vehicle: { id: randomId("veh"), type: "bike", make: "", model: "", registrationNumber: "", color: "" },
-      verificationStatus: "pending",
-      isOnline: false,
-      location: CITY_CENTER,
-    };
+  const result = await apiClient.post<VerifyDriverOtpResult & { token?: string }>(
+    "/api/driver/auth/otp/verify",
+    { phone, otp }
+  );
+  if (result.success && result.token) {
+    setToken(result.token);
   }
-  return networkDelay({ success: true, isNewDriver, driver: driverDb.driver });
+  return result;
 }
 
 export interface VehicleDetailsInput {
@@ -51,50 +38,26 @@ export interface VehicleDetailsInput {
 }
 
 export async function submitVehicleDetails(input: VehicleDetailsInput): Promise<Driver> {
-  if (!driverDb.driver) throw new Error("No authenticated driver");
-  const vehicle: Vehicle = {
-    id: randomId("veh"),
-    type: input.vehicleType,
-    make: input.make,
-    model: input.model,
-    registrationNumber: input.registrationNumber,
-    color: input.color,
-  };
-  driverDb.driver = { ...driverDb.driver, name: input.name, vehicle };
-  return networkDelay(driverDb.driver, 400, 700);
+  return apiClient.post<Driver>("/api/driver/auth/vehicle", input);
 }
 
 export async function getKycDocuments(): Promise<KycDocument[]> {
-  for (const doc of driverDb.kycDocuments) {
-    if (doc.status === "pending_review" && doc.uploadedAt) {
-      const elapsed = Date.now() - new Date(doc.uploadedAt).getTime();
-      if (elapsed > 4000) doc.status = "verified";
-    }
-  }
-  return networkDelay([...driverDb.kycDocuments]);
+  return apiClient.get<KycDocument[]>("/api/driver/auth/kyc");
 }
 
 export async function uploadKycDocument(docId: string, fileName: string): Promise<KycDocument> {
-  const doc = driverDb.kycDocuments.find((d) => d.id === docId);
-  if (!doc) throw new Error("Unknown document");
-  doc.status = "pending_review";
-  doc.fileName = fileName;
-  doc.uploadedAt = new Date().toISOString();
-
-  if (driverDb.driver && driverDb.driver.verificationStatus === "pending") {
-    // stays pending until all docs verified — checked via getVerificationStatus
-  }
-  return networkDelay({ ...doc }, 500, 900);
+  return apiClient.post<KycDocument>(`/api/driver/auth/kyc/${docId}/upload`, { fileName });
 }
 
 export async function getVerificationStatus(): Promise<"pending" | "verified" | "rejected"> {
-  const allVerified = driverDb.kycDocuments.every((d) => d.status === "verified");
-  if (allVerified && driverDb.driver) {
-    driverDb.driver.verificationStatus = "verified";
-  }
-  return networkDelay(driverDb.driver?.verificationStatus ?? "pending", 150, 300);
+  return apiClient.get<"pending" | "verified" | "rejected">("/api/driver/auth/verification-status");
 }
 
 export async function getCurrentDriver(): Promise<Driver | null> {
-  return networkDelay(driverDb.driver);
+  if (!getToken()) return null;
+  try {
+    return await apiClient.get<Driver | null>("/api/driver/auth/me");
+  } catch {
+    return null;
+  }
 }

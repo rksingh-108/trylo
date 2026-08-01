@@ -1,9 +1,11 @@
 "use client";
 
+import * as React from "react";
 import type { Ride } from "@trylo/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as rideService from "../services/ride.service";
 import { queryKeys } from "./queryKeys";
+import { joinRideRoom, leaveRideRoom, onRideUpdated } from "../socketClient";
 
 export function useActiveRide() {
   return useQuery({
@@ -25,8 +27,27 @@ export function useCreateRide() {
 
 const TERMINAL_STATUSES: Ride["status"][] = ["completed", "cancelled"];
 
-/** Polls the simulated ride lifecycle every second until the ride reaches a terminal status. */
+/**
+ * Polls the ride lifecycle every second as a fallback, and applies realtime `ride:updated`
+ * pushes immediately (see packages/mock-data/src/socketClient.ts) once matched to a driver.
+ */
 export function useRideStatus(rideId: string | null) {
+  const queryClient = useQueryClient();
+
+  React.useEffect(() => {
+    if (!rideId) return;
+    joinRideRoom(rideId);
+    const unsubscribe = onRideUpdated<Ride>((ride) => {
+      if (ride.id === rideId) {
+        queryClient.setQueryData(queryKeys.rideStatus(rideId), ride);
+      }
+    });
+    return () => {
+      unsubscribe();
+      leaveRideRoom(rideId);
+    };
+  }, [rideId, queryClient]);
+
   return useQuery({
     queryKey: queryKeys.rideStatus(rideId ?? "none"),
     queryFn: () => rideService.getRideStatus(rideId!),

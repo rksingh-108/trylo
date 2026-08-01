@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: trylo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trylo
+      POSTGRES_PASSWORD: trylo_dev_password
+      POSTGRES_DB: trylo
+    ports:
+      # Host 55432 -> container 5432. A different host port is used deliberately
+      # so this never conflicts with any existing local PostgreSQL install.
+      - "55432:5432"
+    volumes:
+      - trylo_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  trylo_postgres_data:

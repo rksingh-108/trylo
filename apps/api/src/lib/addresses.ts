@@ -1,4 +1,4 @@
-import type { AddressSuggestion, SavedPlace } from "@trylo/types";
+import type { AddressSuggestion } from "@trylo/types";
 import { CITY_CENTER, jitter } from "./geo";
 
 const PLACE_NAMES: Array<{ primaryText: string; secondaryText: string }> = [
@@ -21,28 +21,31 @@ export const addressSuggestions: AddressSuggestion[] = PLACE_NAMES.map((place, i
   point: jitter(CITY_CENTER, 6),
 }));
 
-export const savedPlaces: SavedPlace[] = [
+export function searchAddressSuggestions(query: string): AddressSuggestion[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return addressSuggestions.slice(0, 5);
+  return addressSuggestions.filter(
+    (s) => s.primaryText.toLowerCase().includes(q) || s.secondaryText.toLowerCase().includes(q)
+  );
+}
+
+export const defaultSavedPlaces = [
   {
-    id: "saved_home",
-    label: "home",
+    label: "home" as const,
     name: "Home",
     address: "12th Cross, Indiranagar, Bengaluru",
     point: jitter(CITY_CENTER, 3),
   },
   {
-    id: "saved_work",
-    label: "work",
+    label: "work" as const,
     name: "Work",
     address: "Prestige Tech Park, Kadubeesanahalli, Bengaluru",
     point: jitter(CITY_CENTER, 5),
   },
 ];
 
-export function searchAddressSuggestions(query: string): AddressSuggestion[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return addressSuggestions.slice(0, 5);
-  return addressSuggestions.filter(
-    (s) =>
-      s.primaryText.toLowerCase().includes(q) || s.secondaryText.toLowerCase().includes(q)
-  );
-}
+export const defaultPaymentMethods = [
+  { type: "upi" as const, label: "UPI", detail: "you@okhdfcbank", isDefault: true },
+  { type: "card" as const, label: "HDFC Bank Debit Card", detail: "•••• 4821", isDefault: false },
+  { type: "cash" as const, label: "Cash", detail: "Pay the driver directly", isDefault: false },
+];

@@ -1,11 +1,10 @@
 import type { AddressSuggestion, SavedPlace } from "@trylo/types";
-import { networkDelay } from "../latency";
-import { savedPlaces, searchAddressSuggestions } from "../seed";
+import { apiClient } from "../apiClient";
 
 export async function searchAddresses(query: string): Promise<AddressSuggestion[]> {
-  return networkDelay(searchAddressSuggestions(query), 200, 500);
+  return apiClient.get<AddressSuggestion[]>("/api/customer/addresses/search", { q: query });
 }
 
 export async function getSavedPlaces(): Promise<SavedPlace[]> {
-  return networkDelay(savedPlaces);
+  return apiClient.get<SavedPlace[]>("/api/customer/saved-places");
 }

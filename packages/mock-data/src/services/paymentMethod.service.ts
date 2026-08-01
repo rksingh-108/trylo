@@ -1,7 +1,6 @@
 import type { PaymentMethod } from "@trylo/types";
-import { networkDelay } from "../latency";
-import { paymentMethods } from "../seed";
+import { apiClient } from "../apiClient";
 
 export async function getPaymentMethods(): Promise<PaymentMethod[]> {
-  return networkDelay([...paymentMethods]);
+  return apiClient.get<PaymentMethod[]>("/api/customer/payment-methods");
 }
