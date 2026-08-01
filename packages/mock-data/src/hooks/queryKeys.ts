@@ -10,6 +10,7 @@ export const queryKeys = {
   rideHistory: ["rideHistory"] as const,
   rideDetail: (rideId: string) => ["rideDetail", rideId] as const,
   wallet: ["wallet"] as const,
+  paymentMethods: ["paymentMethods"] as const,
 
   currentDriver: ["currentDriver"] as const,
   kycDocuments: ["kycDocuments"] as const,

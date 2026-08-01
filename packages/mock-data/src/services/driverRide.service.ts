@@ -118,6 +118,8 @@ export async function endRide(rideId: string): Promise<Ride | null> {
 
   ride.status = "completed";
   ride.completedAt = new Date().toISOString();
+  // Simulates the rider rating the trip immediately after completion (no cross-app sync in this mock).
+  ride.rating = Math.random() < 0.7 ? 5 : 4;
   driverDb.rideHistory.unshift(ride);
   driverDb.activeRide = null;
   if (driverDb.driver) {

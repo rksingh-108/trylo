@@ -6,6 +6,7 @@ import { customerDb } from "../store";
 const MATCHED_AT_MS = 3000;
 const ARRIVING_AT_MS = 6000;
 const IN_PROGRESS_AT_MS = 13000;
+const TRIP_DURATION_MS = 12000;
 
 export interface CreateRideInput {
   pickup: RideLocation;
@@ -58,6 +59,15 @@ export async function getRideStatus(rideId: string): Promise<Ride | null> {
   if (elapsed >= IN_PROGRESS_AT_MS && ride.status === "arriving") {
     ride.status = "in_progress";
     ride.startedAt = new Date().toISOString();
+  }
+  if (ride.status === "in_progress" && ride.startedAt) {
+    const tripElapsed = Date.now() - new Date(ride.startedAt).getTime();
+    if (tripElapsed >= TRIP_DURATION_MS) {
+      ride.status = "completed";
+      ride.completedAt = new Date().toISOString();
+      customerDb.rideHistory.unshift(ride);
+      customerDb.activeRide = null;
+    }
   }
 
   return networkDelay({ ...ride }, 150, 350);

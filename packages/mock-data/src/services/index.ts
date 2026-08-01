@@ -5,6 +5,7 @@ export * from "./driverDiscovery.service";
 export * from "./ride.service";
 export * from "./wallet.service";
 export * from "./history.service";
+export * from "./paymentMethod.service";
 export * from "./driverAuth.service";
 export * from "./driverDashboard.service";
 export * from "./driverRide.service";
