@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { haversineKm } from "../lib/geo";
 import { serializeRide } from "../lib/serialize";
-import { emitIncomingRequest } from "../realtime/io";
+import { emitIncomingRequest, emitRequestCleared } from "../realtime/io";
 
 const OFFER_WINDOW_MS = 15_000;
 const TICK_MS = 1_000;
@@ -21,6 +21,7 @@ async function expireStaleOffers() {
         excludedDriverIds: ride.driverId ? { push: ride.driverId } : undefined,
       },
     });
+    if (ride.driverId) emitRequestCleared(ride.driverId);
   }
 }
 
