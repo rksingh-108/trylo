@@ -82,7 +82,10 @@ async function waitFor<T>(
   throw new Error(`Timed out waiting for: ${label}`);
 }
 
-async function main() {
+/** Set once the driver token is known, so the outer wrapper can always take the driver offline again. */
+let capturedDriverToken: string | null = null;
+
+async function run() {
   const suffix = Date.now().toString().slice(-8);
   const customerPhone = `9${suffix}1`;
   const driverPhone = `9${suffix}2`;
@@ -143,6 +146,7 @@ async function main() {
     "driver OTP verified as a new driver, JWT issued"
   );
   const driverToken = drvVerify.data.token;
+  capturedDriverToken = driverToken;
 
   const kycList = await api<Array<{ id: string; type: string }>>("/api/driver/auth/kyc", {
     token: driverToken,
@@ -328,12 +332,23 @@ async function main() {
 
   driverSocket.close();
   customerSocket.close();
-
-  console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
-  process.exit(failures === 0 ? 0 : 1);
 }
 
-main().catch((err) => {
-  console.error("\nE2E TEST FAILED:", err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+run()
+  .catch((err) => {
+    failures++;
+    console.error("\nE2E TEST FAILED:", err instanceof Error ? err.message : err);
+  })
+  .finally(async () => {
+    // Always take the test driver back offline, so a failed/interrupted run never leaves it
+    // competing (as a stale, disconnected candidate) for rides in a later run.
+    if (capturedDriverToken) {
+      await api("/api/driver/status", {
+        method: "POST",
+        token: capturedDriverToken,
+        body: { isOnline: false },
+      }).catch(() => {});
+    }
+    console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
+    process.exit(failures === 0 ? 0 : 1);
+  });
