@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "../db";
 import { requireAuth } from "../auth/middleware";
 import { serializeDriver, serializeRide } from "../lib/serialize";
-import { emitRideUpdated } from "../realtime/io";
+import { emitDriverLocation, emitRideUpdated } from "../realtime/io";
 import { recordRideStatus } from "../lib/rideHistory";
 
 const router = Router();
@@ -20,6 +20,28 @@ router.post("/status", requireAuth("driver"), async (req, res) => {
     onlineSince: parsed.data.isOnline ? new Date() : null,
   };
   const driver = await db.driver.update({ where: { id: req.auth!.id }, data });
+  res.json(serializeDriver(driver));
+});
+
+const locationSchema = z.object({ lat: z.number(), lng: z.number() });
+
+router.post("/location", requireAuth("driver"), async (req, res) => {
+  const parsed = locationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid location" });
+    return;
+  }
+  const driver = await db.driver.update({
+    where: { id: req.auth!.id },
+    data: { lat: parsed.data.lat, lng: parsed.data.lng },
+  });
+
+  const activeRide = await db.ride.findFirst({
+    where: { driverId: driver.id, status: { in: ["arriving", "in_progress"] } },
+    select: { id: true },
+  });
+  if (activeRide) emitDriverLocation(activeRide.id, { lat: parsed.data.lat, lng: parsed.data.lng });
+
   res.json(serializeDriver(driver));
 });
 

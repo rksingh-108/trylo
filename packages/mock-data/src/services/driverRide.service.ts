@@ -1,4 +1,4 @@
-import type { Ride } from "@trylo/types";
+import type { Driver, Ride } from "@trylo/types";
 import { apiClient } from "../apiClient";
 
 export interface IncomingRequestOffer {
@@ -32,4 +32,8 @@ export async function endRide(rideId: string): Promise<Ride | null> {
 
 export async function getDriverRideHistory(): Promise<Ride[]> {
   return apiClient.get<Ride[]>("/api/driver/rides/history");
+}
+
+export async function updateDriverLocation(lat: number, lng: number): Promise<Driver> {
+  return apiClient.post<Driver>("/api/driver/location", { lat, lng });
 }

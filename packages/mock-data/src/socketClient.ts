@@ -56,3 +56,10 @@ export function onRequestCleared(handler: () => void): () => void {
   s.on("request_cleared", handler);
   return () => s.off("request_cleared", handler);
 }
+
+export function onDriverLocation<T = unknown>(handler: (location: T) => void): () => void {
+  const s = getSocket();
+  if (!s) return () => {};
+  s.on("driver:location", handler);
+  return () => s.off("driver:location", handler);
+}

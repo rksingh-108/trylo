@@ -101,3 +101,7 @@ export function emitIncomingRequest(driverId: string, offer: unknown) {
 export function emitRequestCleared(driverId: string) {
   io?.to(`driver:${driverId}`).emit("request_cleared");
 }
+
+export function emitDriverLocation(rideId: string, location: { lat: number; lng: number }) {
+  io?.to(`ride:${rideId}`).emit("driver:location", location);
+}

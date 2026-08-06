@@ -18,10 +18,10 @@ export * from "./components/toast";
 export * from "./kinetic/fare-badge";
 export * from "./kinetic/rating-stars";
 export * from "./kinetic/status-pill";
-export * from "./kinetic/map-placeholder";
 export * from "./kinetic/animated-counter";
 export * from "./kinetic/premium-map";
 export * from "./kinetic/place-autocomplete";
+export * from "./kinetic/geocoding";
 export * from "./kinetic/empty-state";
 export * from "./kinetic/page-transition";
 

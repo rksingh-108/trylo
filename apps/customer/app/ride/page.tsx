@@ -21,7 +21,7 @@ import {
   StatusPill,
   type RouteInfo,
 } from "@trylo/ui";
-import { useRideStatus } from "@trylo/mock-data/hooks";
+import { useDriverLiveLocation, useRideStatus } from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
 
 function initials(name: string) {
@@ -37,6 +37,7 @@ export default function LiveRidePage() {
   const router = useRouter();
   const { activeRideId } = useBookingStore();
   const { data: ride } = useRideStatus(activeRideId);
+  const liveDriverLocation = useDriverLiveLocation(activeRideId);
   const [sosOpen, setSosOpen] = React.useState(false);
   const [routeInfo, setRouteInfo] = React.useState<RouteInfo | null>(null);
 
@@ -62,7 +63,7 @@ export default function LiveRidePage() {
           className="h-72 w-full"
           pickup={ride.pickup.point}
           drop={ride.drop.point}
-          liveMarker={driver?.location}
+          liveMarker={liveDriverLocation ?? driver?.location}
           showRoute
           onRouteInfo={setRouteInfo}
         />

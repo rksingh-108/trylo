@@ -5,7 +5,7 @@ import type { Ride } from "@trylo/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as rideService from "../services/ride.service";
 import { queryKeys } from "./queryKeys";
-import { joinRideRoom, leaveRideRoom, onRideUpdated } from "../socketClient";
+import { joinRideRoom, leaveRideRoom, onDriverLocation, onRideUpdated } from "../socketClient";
 
 export function useActiveRide() {
   return useQuery({
@@ -59,6 +59,26 @@ export function useRideStatus(rideId: string | null) {
     },
     refetchIntervalInBackground: true,
   });
+}
+
+/**
+ * Live driver GPS position for the given ride, pushed by the driver's device via
+ * the `driver:location` socket event (see driverRide.service.ts's location
+ * reporting and apps/api's POST /api/driver/location). Returns null until the
+ * first push arrives — callers should fall back to the ride's own driver.location
+ * (a coarser, DB-persisted value) until then.
+ */
+export function useDriverLiveLocation(rideId: string | null) {
+  const [location, setLocation] = React.useState<{ lat: number; lng: number } | null>(null);
+
+  React.useEffect(() => {
+    setLocation(null);
+    if (!rideId) return;
+    const unsubscribe = onDriverLocation<{ lat: number; lng: number }>((loc) => setLocation(loc));
+    return () => unsubscribe();
+  }, [rideId]);
+
+  return location;
 }
 
 export function useCancelRide() {

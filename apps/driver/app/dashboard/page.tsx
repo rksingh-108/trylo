@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { Clock3, TrendingUp, User, Wallet, Zap } from "lucide-react";
 import { AnimatedCounter, Card, PremiumMap, RatingStars, Switch } from "@trylo/ui";
-import { useDashboardSummary, useIncomingRequest, useSetOnlineStatus } from "@trylo/mock-data/hooks";
+import { useDashboardSummary, useIncomingRequest, useReportLiveLocation, useSetOnlineStatus } from "@trylo/mock-data/hooks";
 import { IncomingRequestOverlay } from "@/components/incoming-request-overlay";
 
 function formatOnlineDuration(minutes: number) {
@@ -26,7 +26,8 @@ export default function DashboardPage() {
     setOnlineStatus.mutate(next);
   }
 
-  const driverLocation = summary?.driver?.location;
+  const liveGpsLocation = useReportLiveLocation(isOnline);
+  const driverLocation = liveGpsLocation ?? summary?.driver?.location;
 
   return (
     <div className="flex flex-1 flex-col pb-6">

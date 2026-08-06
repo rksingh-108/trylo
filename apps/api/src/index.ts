@@ -23,6 +23,17 @@ const httpServer = createServer(app);
 initSocketServer(httpServer);
 startMatchingLoop();
 
+// A failure to bind the port (e.g. EADDRINUSE from a stale process still
+// holding it) means this process cannot serve traffic at all — that must
+// stay fatal. Letting the generic uncaughtException handler above swallow it
+// would leave a zombie process that looks alive (still running, still able
+// to log) but never actually listens, silently answering nothing.
+httpServer.on("error", (err) => {
+  // eslint-disable-next-line no-console
+  console.error(`[fatal] Failed to start server on port ${env.PORT}:`, err);
+  process.exit(1);
+});
+
 httpServer.listen(env.PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`TRYLO API listening on http://localhost:${env.PORT}`);

@@ -75,6 +75,76 @@ function useSmoothPosition(target: MapGeoPoint | undefined, durationMs = 900) {
   return pos;
 }
 
+/** Decodes a Google encoded polyline string into a lat/lng path. */
+function decodePolyline(encoded: string): MapGeoPoint[] {
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const coordinates: MapGeoPoint[] = [];
+
+  while (index < encoded.length) {
+    let shift = 0;
+    let result = 0;
+    let byte: number;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lat += result & 1 ? ~(result >> 1) : result >> 1;
+
+    shift = 0;
+    result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lng += result & 1 ? ~(result >> 1) : result >> 1;
+
+    coordinates.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+  return coordinates;
+}
+
+/**
+ * Fetches a driving route from the Routes API (routes.googleapis.com) — the
+ * current, actively-supported Google routing API. Deliberately NOT the legacy
+ * google.maps.DirectionsService: it's being phased toward this same Routes
+ * API by Google itself, and a project may have one enabled without the other.
+ */
+async function fetchRoute(
+  pickup: MapGeoPoint,
+  drop: MapGeoPoint,
+  apiKey: string
+): Promise<{ path: MapGeoPoint[]; distanceKm: number; durationMin: number } | null> {
+  try {
+    const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline",
+      },
+      body: JSON.stringify({
+        origin: { location: { latLng: { latitude: pickup.lat, longitude: pickup.lng } } },
+        destination: { location: { latLng: { latitude: drop.lat, longitude: drop.lng } } },
+        travelMode: "DRIVE",
+      }),
+    });
+    const data = await res.json();
+    const route = data.routes?.[0];
+    if (!route?.polyline?.encodedPolyline) return null;
+    return {
+      path: decodePolyline(route.polyline.encodedPolyline),
+      distanceKm: Math.round(((route.distanceMeters ?? 0) / 1000) * 10) / 10,
+      durationMin: Math.round(parseInt(route.duration ?? "0", 10) / 60),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function RoutePolyline({
   pickup,
   drop,
@@ -85,55 +155,39 @@ function RoutePolyline({
   onRouteInfo?: (info: RouteInfo) => void;
 }) {
   const map = useMap();
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const polylineRef = React.useRef<google.maps.Polyline | null>(null);
 
   React.useEffect(() => {
-    if (!map || !window.google) return;
-    const directionsService = new google.maps.DirectionsService();
+    if (!map || !window.google || !apiKey) return;
     let cancelled = false;
 
-    directionsService.route(
-      {
-        origin: pickup,
-        destination: drop,
-        travelMode: google.maps.TravelMode.DRIVING,
-      },
-      (result, status) => {
-        if (cancelled || status !== "OK" || !result) return;
-        const route = result.routes[0];
-        if (!route) return;
-        const path = route.overview_path;
+    fetchRoute(pickup, drop, apiKey).then((route) => {
+      if (cancelled || !route) return;
 
-        polylineRef.current?.setMap(null);
-        polylineRef.current = new google.maps.Polyline({
-          path,
-          strokeColor: "#FF7A1A",
-          strokeOpacity: 0.95,
-          strokeWeight: 5,
-          map,
-        });
+      polylineRef.current?.setMap(null);
+      polylineRef.current = new google.maps.Polyline({
+        path: route.path,
+        strokeColor: "#FF7A1A",
+        strokeOpacity: 0.95,
+        strokeWeight: 5,
+        map,
+      });
 
-        const leg = route.legs[0];
-        if (leg && onRouteInfo) {
-          onRouteInfo({
-            distanceKm: Math.round(((leg.distance?.value ?? 0) / 1000) * 10) / 10,
-            durationMin: Math.round((leg.duration?.value ?? 0) / 60),
-          });
-        }
+      onRouteInfo?.({ distanceKm: route.distanceKm, durationMin: route.durationMin });
 
-        const bounds = new google.maps.LatLngBounds();
-        bounds.extend(pickup);
-        bounds.extend(drop);
-        map.fitBounds(bounds, 72);
-      }
-    );
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(pickup);
+      bounds.extend(drop);
+      map.fitBounds(bounds, 72);
+    });
 
     return () => {
       cancelled = true;
       polylineRef.current?.setMap(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, pickup.lat, pickup.lng, drop.lat, drop.lng]);
+  }, [map, apiKey, pickup.lat, pickup.lng, drop.lat, drop.lng]);
 
   return null;
 }

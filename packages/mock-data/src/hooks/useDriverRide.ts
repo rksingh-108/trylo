@@ -125,3 +125,37 @@ export function useDriverRideHistory() {
     queryFn: driverRideService.getDriverRideHistory,
   });
 }
+
+/**
+ * Watches the device's real GPS position while `enabled`, returning it immediately
+ * for local map display (no need to wait on a server round-trip to see your own
+ * position move) and pushing it to the backend at most once every 5s so the rider
+ * can see the driver move live on their own map via the `driver:location` socket
+ * event. Returns null if geolocation is unavailable/denied.
+ */
+export function useReportLiveLocation(enabled: boolean) {
+  const [position, setPosition] = React.useState<{ lat: number; lng: number } | null>(null);
+  const lastSentRef = React.useRef(0);
+
+  React.useEffect(() => {
+    if (!enabled || typeof navigator === "undefined" || !navigator.geolocation) return;
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setPosition(next);
+        const now = Date.now();
+        if (now - lastSentRef.current > 5000) {
+          lastSentRef.current = now;
+          driverRideService.updateDriverLocation(next.lat, next.lng).catch(() => {});
+        }
+      },
+      () => {
+        // permission denied / unavailable — caller falls back to the last known DB location
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [enabled]);
+
+  return position;
+}

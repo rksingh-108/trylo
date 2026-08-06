@@ -6,6 +6,7 @@ import { Briefcase, Home as HomeIcon, MapPin, Search, User, Wallet } from "lucid
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
+  getCurrentLocationWithAddress,
   PageTransition,
   PlaceAutocomplete,
   PremiumMap,
@@ -42,10 +43,20 @@ export default function HomePage() {
   const { data: savedPlaces, isLoading: savedPlacesLoading } = useSavedPlaces();
 
   React.useEffect(() => {
-    if (!pickup) {
-      setPickup({ address: "Current Location", point: CITY_CENTER });
-    }
-  }, [pickup, setPickup]);
+    if (pickup) return;
+    // Set a sensible default immediately so the map has something to center on,
+    // then upgrade to the real GPS position + reverse-geocoded address once
+    // available (or silently keep the default if location access is denied).
+    setPickup({ address: "Current Location", point: CITY_CENTER });
+    let cancelled = false;
+    getCurrentLocationWithAddress().then((real) => {
+      if (real && !cancelled) setPickup(real);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   React.useEffect(() => {
     if (!sheetOpen) setQuery("");

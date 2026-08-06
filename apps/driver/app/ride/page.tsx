@@ -17,7 +17,7 @@ import {
   StatusPill,
 } from "@trylo/ui";
 import type { RouteInfo } from "@trylo/ui";
-import { useActiveDriverRide, useEndRide, useVerifyRiderOtp } from "@trylo/mock-data/hooks";
+import { useActiveDriverRide, useEndRide, useReportLiveLocation, useVerifyRiderOtp } from "@trylo/mock-data/hooks";
 import type { Ride } from "@trylo/types";
 
 function initials(name: string) {
@@ -34,6 +34,7 @@ export default function ActiveRidePage() {
   const { data: ride } = useActiveDriverRide();
   const verifyOtp = useVerifyRiderOtp();
   const endRide = useEndRide();
+  const liveGpsLocation = useReportLiveLocation(Boolean(ride));
 
   const [otp, setOtp] = React.useState("");
   const [otpError, setOtpError] = React.useState<string | null>(null);
@@ -78,7 +79,7 @@ export default function ActiveRidePage() {
           className="h-60 w-full"
           pickup={ride.pickup.point}
           drop={ride.drop.point}
-          liveMarker={ride.driver?.location}
+          liveMarker={liveGpsLocation ?? ride.driver?.location}
           showRoute
           onRouteInfo={setRouteInfo}
         />
