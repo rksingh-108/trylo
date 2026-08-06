@@ -1,41 +1,36 @@
 import type { MapGeoPoint } from "./premium-map";
 
-/** Converts a lat/lng into a real street address via the Google Geocoding API. */
+const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
+
+/** Converts a lat/lng into a real street address via OpenStreetMap's Nominatim (free, no key). */
 export async function reverseGeocode(point: MapGeoPoint): Promise<string | null> {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
   try {
     const res = await fetch(
-      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${point.lat},${point.lng}&key=${apiKey}`
+      `${NOMINATIM_BASE}/reverse?lat=${point.lat}&lon=${point.lng}&format=json&zoom=18`,
+      { headers: { Accept: "application/json" } }
     );
     const data = await res.json();
-    if (data.status === "OK" && data.results?.[0]?.formatted_address) {
-      return data.results[0].formatted_address as string;
-    }
-    return null;
+    return (data?.display_name as string | undefined) ?? null;
   } catch {
     return null;
   }
 }
 
-/** Converts a free-text address into a lat/lng via the Google Geocoding API. */
+/** Converts a free-text address into a lat/lng via Nominatim. */
 export async function geocodeAddress(address: string): Promise<(MapGeoPoint & { formattedAddress: string }) | null> {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
   try {
     const res = await fetch(
-      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`
+      `${NOMINATIM_BASE}/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+      { headers: { Accept: "application/json" } }
     );
     const data = await res.json();
-    const result = data.results?.[0];
-    if (data.status === "OK" && result?.geometry?.location) {
-      return {
-        lat: result.geometry.location.lat,
-        lng: result.geometry.location.lng,
-        formattedAddress: result.formatted_address,
-      };
-    }
-    return null;
+    const result = data?.[0];
+    if (!result) return null;
+    return {
+      lat: parseFloat(result.lat),
+      lng: parseFloat(result.lon),
+      formattedAddress: result.display_name as string,
+    };
   } catch {
     return null;
   }

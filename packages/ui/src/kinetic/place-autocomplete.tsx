@@ -1,9 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { APIProvider, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { MapPin, Search } from "lucide-react";
-import { cn } from "../lib/cn";
 import { Input } from "../components/input";
 
 export interface PlaceResult {
@@ -13,96 +11,44 @@ export interface PlaceResult {
   lng: number;
 }
 
-function AutocompleteInner({
-  value,
-  onChange,
-  onSelect,
-  placeholder,
-  autoFocus,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onSelect: (place: PlaceResult) => void;
-  placeholder?: string;
-  autoFocus?: boolean;
-}) {
-  const places = useMapsLibrary("places");
-  const [predictions, setPredictions] = React.useState<google.maps.places.AutocompletePrediction[]>([]);
-  const autocompleteService = React.useRef<google.maps.places.AutocompleteService | null>(null);
-  const placesService = React.useRef<google.maps.places.PlacesService | null>(null);
-  const sessionToken = React.useRef<google.maps.places.AutocompleteSessionToken | null>(null);
+interface PhotonFeature {
+  geometry: { coordinates: [number, number] };
+  properties: {
+    osm_id?: number;
+    osm_type?: string;
+    name?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    postcode?: string;
+};
+}
 
-  React.useEffect(() => {
-    if (!places) return;
-    autocompleteService.current = new places.AutocompleteService();
-    sessionToken.current = new places.AutocompleteSessionToken();
-    placesService.current = new places.PlacesService(document.createElement("div"));
-  }, [places]);
-
-  React.useEffect(() => {
-    if (!autocompleteService.current || !value.trim()) {
-      setPredictions([]);
-      return;
-    }
-    autocompleteService.current.getPlacePredictions(
-      { input: value, sessionToken: sessionToken.current ?? undefined },
-      (results) => setPredictions(results ?? [])
-    );
-  }, [value]);
-
-  function handleSelect(prediction: google.maps.places.AutocompletePrediction) {
-    placesService.current?.getDetails(
-      { placeId: prediction.place_id, fields: ["geometry", "formatted_address", "name"] },
-      (result) => {
-        const loc = result?.geometry?.location;
-        if (!loc) return;
-        onSelect({
-          description: result?.formatted_address ?? prediction.description,
-          placeId: prediction.place_id,
-          lat: loc.lat(),
-          lng: loc.lng(),
-        });
-        setPredictions([]);
-      }
-    );
-  }
-
-  return (
-    <div className="relative">
-      <div className="relative">
-        <Search size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={value}
-          autoFocus={autoFocus}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder ?? "Search destination"}
-          className="pl-11"
-        />
-      </div>
-      {predictions.length > 0 && (
-        <div className="absolute inset-x-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-border bg-card shadow-elevation-3 animate-in fade-in slide-in-from-top-1">
-          {predictions.map((p) => (
-            <button
-              key={p.place_id}
-              type="button"
-              onClick={() => handleSelect(p)}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent"
-            >
-              <MapPin size={16} className="shrink-0 text-muted-foreground" />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {p.structured_formatting?.main_text ?? p.description}
-                </p>
-                {p.structured_formatting?.secondary_text && (
-                  <p className="truncate text-xs text-muted-foreground">{p.structured_formatting.secondary_text}</p>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+function describe(props: PhotonFeature["properties"]): string {
+  const parts = [props.name, props.street, props.city, props.state, props.country].filter(
+    (p, i, arr): p is string => Boolean(p) && arr.indexOf(p) === i
   );
+  return parts.join(", ");
+}
+
+async function searchPhoton(query: string): Promise<PlaceResult[]> {
+  try {
+    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=6`);
+    const data = await res.json();
+    const features: PhotonFeature[] = data?.features ?? [];
+    return features
+      .filter((f) => f.geometry?.coordinates)
+      .map((f, i) => ({
+        description: describe(f.properties),
+        placeId: `${f.properties.osm_type ?? "place"}-${f.properties.osm_id ?? i}-${i}`,
+        lat: f.geometry.coordinates[1],
+        lng: f.geometry.coordinates[0],
+      }))
+      .filter((p) => p.description);
+  } catch {
+    return [];
+  }
 }
 
 export interface PlaceAutocompleteProps {
@@ -114,29 +60,58 @@ export interface PlaceAutocompleteProps {
   className?: string;
 }
 
-/** Google Places Autocomplete search box. Falls back to a plain text input if no Maps API key is set. */
-export function PlaceAutocomplete({ className, ...props }: PlaceAutocompleteProps) {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+/** Location search box backed by Photon (photon.komoot.io) — free, no API key, OpenStreetMap-based. */
+export function PlaceAutocomplete({ value, onChange, onSelect, placeholder, autoFocus, className }: PlaceAutocompleteProps) {
+  const [results, setResults] = React.useState<PlaceResult[]>([]);
+  const requestId = React.useRef(0);
 
-  if (!apiKey) {
-    return (
-      <div className={cn("relative", className)}>
-        <Search size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={props.value}
-          onChange={(e) => props.onChange(e.target.value)}
-          placeholder={props.placeholder ?? "Search destination"}
-          className="pl-11"
-        />
-      </div>
-    );
+  React.useEffect(() => {
+    if (!value.trim()) {
+      setResults([]);
+      return;
+    }
+    const id = ++requestId.current;
+    const timer = setTimeout(async () => {
+      const found = await searchPhoton(value);
+      if (requestId.current === id) setResults(found);
+    }, 300); // debounced so every keystroke doesn't hit the free search API
+    return () => clearTimeout(timer);
+  }, [value]);
+
+  function handleSelect(place: PlaceResult) {
+    onSelect(place);
+    setResults([]);
   }
 
   return (
-    <APIProvider apiKey={apiKey}>
-      <div className={className}>
-        <AutocompleteInner {...props} />
+    <div className={className}>
+      <div className="relative">
+        <div className="relative">
+          <Search size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={value}
+            autoFocus={autoFocus}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder ?? "Search destination"}
+            className="pl-11"
+          />
+        </div>
+        {results.length > 0 && (
+          <div className="absolute inset-x-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-border bg-card shadow-elevation-3 animate-in fade-in slide-in-from-top-1">
+            {results.map((place) => (
+              <button
+                key={place.placeId}
+                type="button"
+                onClick={() => handleSelect(place)}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent"
+              >
+                <MapPin size={16} className="shrink-0 text-muted-foreground" />
+                <p className="min-w-0 truncate text-sm font-medium text-foreground">{place.description}</p>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-    </APIProvider>
+    </div>
   );
 }
