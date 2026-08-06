@@ -38,3 +38,10 @@ export function useCompleteProfile() {
     },
   });
 }
+
+/** Revokes the session server-side and clears local tokens; caller still owns navigation/cache-clear. */
+export function useLogout() {
+  return useMutation({
+    mutationFn: authService.logout,
+  });
+}

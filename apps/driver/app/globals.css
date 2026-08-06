@@ -11,6 +11,18 @@
   --ring: 175 82% 26%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   @apply bg-background text-foreground font-body antialiased;
+}
+
+::selection {
+  @apply bg-primary/25;
+}
+
+* {
+  @apply border-border;
 }

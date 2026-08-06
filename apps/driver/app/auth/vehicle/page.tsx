@@ -4,8 +4,9 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { motion } from "framer-motion";
 import { Bike, Car, CarTaxiFront } from "lucide-react";
-import { Button, cn, Input, Label } from "@trylo/ui";
+import { Button, cn, Input, Label, PageTransition } from "@trylo/ui";
 import { useSubmitVehicleDetails } from "@trylo/mock-data/hooks";
 import { vehicleDetailsSchema, type VehicleDetailsInput } from "@/lib/validation";
 import type { VehicleType } from "@trylo/types";
@@ -41,11 +42,15 @@ export default function VehicleDetailsPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col px-6 pb-8 pt-12">
-      <h1 className="font-display text-2xl font-semibold text-foreground">Vehicle details</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Tell us about you and the vehicle you'll drive.</p>
+    <PageTransition className="relative flex flex-1 flex-col overflow-hidden px-6 pb-8 pt-12">
+      <div className="pointer-events-none absolute -right-20 -top-16 h-64 w-64 rounded-full bg-primary/10 blur-[90px]" />
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-6 flex flex-1 flex-col gap-4">
+      <div className="relative">
+        <h1 className="font-display text-2xl font-semibold text-foreground">Vehicle details</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Tell us about you and the vehicle you'll drive.</p>
+      </div>
+
+      <form onSubmit={handleSubmit(onSubmit)} className="relative mt-6 flex flex-1 flex-col gap-5">
         <div className="flex flex-col gap-2">
           <Label htmlFor="name">Full name</Label>
           <Input id="name" placeholder="e.g. Ramesh Kumar" {...register("name")} />
@@ -55,20 +60,35 @@ export default function VehicleDetailsPage() {
         <div className="flex flex-col gap-2">
           <Label>Vehicle type</Label>
           <div className="grid grid-cols-3 gap-2">
-            {VEHICLE_OPTIONS.map(({ type, label, icon: Icon }) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => setValue("vehicleType", type, { shouldValidate: true })}
-                className={cn(
-                  "flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-colors",
-                  vehicleType === type ? "border-primary bg-primary/5" : "border-border bg-card"
-                )}
-              >
-                <Icon size={22} className={vehicleType === type ? "text-primary" : "text-foreground"} />
-                <span className="text-xs font-medium text-foreground">{label}</span>
-              </button>
-            ))}
+            {VEHICLE_OPTIONS.map(({ type, label, icon: Icon }) => {
+              const selected = vehicleType === type;
+              return (
+                <motion.button
+                  key={type}
+                  type="button"
+                  whileTap={{ scale: 0.96 }}
+                  onClick={() => setValue("vehicleType", type, { shouldValidate: true })}
+                  className={cn(
+                    "flex flex-col items-center gap-2 rounded-2xl border p-4 transition-colors",
+                    selected
+                      ? "border-primary bg-primary/5 shadow-elevation-1"
+                      : "border-border bg-card hover:border-primary/40"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "grid h-10 w-10 place-items-center rounded-full transition-colors",
+                      selected ? "bg-primary text-primary-foreground" : "bg-accent text-foreground"
+                    )}
+                  >
+                    <Icon size={20} />
+                  </span>
+                  <span className={cn("text-xs font-medium", selected ? "text-primary" : "text-foreground")}>
+                    {label}
+                  </span>
+                </motion.button>
+              );
+            })}
           </div>
         </div>
 
@@ -105,10 +125,10 @@ export default function VehicleDetailsPage() {
           </div>
         </div>
 
-        <Button type="submit" size="lg" className="mt-auto" disabled={submitVehicle.isPending}>
+        <Button type="submit" size="lg" variant="glow" className="mt-auto" disabled={submitVehicle.isPending}>
           {submitVehicle.isPending ? "Saving..." : "Submit for verification"}
         </Button>
       </form>
-    </div>
+    </PageTransition>
   );
 }

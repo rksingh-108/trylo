@@ -1,8 +1,8 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
-import { Avatar, AvatarFallback, FareBadge, RatingStars, StatusPill } from "@trylo/ui";
+import { ChevronLeft, Receipt } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage, Card, FareBadge, PageTransition, RatingStars, StatusPill } from "@trylo/ui";
 import { useRideDetail } from "@trylo/mock-data/hooks";
 
 function initials(name: string) {
@@ -21,18 +21,28 @@ export default function RideDetailPage() {
 
   if (!ride) return null;
 
+  const totalPaid = ride.fare.total + (ride.tip ?? 0);
+
   return (
-    <div className="flex flex-1 flex-col px-5 pb-8 pt-5">
+    <PageTransition className="flex flex-1 flex-col px-5 pb-8 pt-5">
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={() => router.back()}
-          className="grid h-9 w-9 place-items-center rounded-full border border-border"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border text-foreground transition-colors hover:bg-accent"
           aria-label="Back"
         >
           <ChevronLeft size={18} />
         </button>
-        <h1 className="font-display text-lg font-semibold text-foreground">Trip receipt</h1>
+        <div>
+          <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <Receipt size={12} />
+            Trip receipt
+          </p>
+          <h1 className="font-display text-lg font-semibold text-foreground">
+            {new Date(ride.completedAt ?? ride.requestedAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}
+          </h1>
+        </div>
       </div>
 
       <div className="mt-5 flex items-center justify-between">
@@ -46,8 +56,9 @@ export default function RideDetailPage() {
       </div>
 
       {ride.driver && (
-        <div className="mt-4 flex items-center gap-3 rounded-xl border border-border bg-card p-4">
+        <Card className="mt-4 flex items-center gap-3 p-4">
           <Avatar className="h-11 w-11">
+            {ride.driver.avatarUrl && <AvatarImage src={ride.driver.avatarUrl} alt={ride.driver.name} />}
             <AvatarFallback>{initials(ride.driver.name)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
@@ -57,10 +68,10 @@ export default function RideDetailPage() {
             </p>
           </div>
           {ride.rating && <RatingStars value={ride.rating} size={14} />}
-        </div>
+        </Card>
       )}
 
-      <div className="mt-4 rounded-xl border border-border bg-card p-4">
+      <Card className="mt-4 p-4">
         <div className="flex gap-3">
           <div className="flex flex-col items-center pt-1">
             <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
@@ -78,55 +89,56 @@ export default function RideDetailPage() {
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-border bg-card p-4 text-center">
-        <div>
+      <Card className="mt-4 grid grid-cols-2 divide-x divide-border p-0 text-center">
+        <div className="p-4">
           <p className="text-xs text-muted-foreground">Distance</p>
           <p className="mt-1 font-mono text-sm font-semibold text-foreground">{ride.distanceKm} km</p>
         </div>
-        <div>
+        <div className="p-4">
           <p className="text-xs text-muted-foreground">Duration</p>
           <p className="mt-1 font-mono text-sm font-semibold text-foreground">{ride.durationMin} min</p>
         </div>
-      </div>
+      </Card>
 
-      <div className="mt-4 rounded-xl border border-border bg-card p-4">
+      <Card className="mt-4 p-4">
+        <p className="mb-3 text-sm font-medium text-foreground">Fare breakdown</p>
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Base fare</span>
-          <span className="text-foreground">₹{ride.fare.base}</span>
+          <span className="font-mono text-foreground">₹{ride.fare.base}</span>
         </div>
         <div className="mt-2 flex justify-between text-sm">
           <span className="text-muted-foreground">Distance</span>
-          <span className="text-foreground">₹{ride.fare.distance}</span>
+          <span className="font-mono text-foreground">₹{ride.fare.distance}</span>
         </div>
         <div className="mt-2 flex justify-between text-sm">
           <span className="text-muted-foreground">Time</span>
-          <span className="text-foreground">₹{ride.fare.time}</span>
+          <span className="font-mono text-foreground">₹{ride.fare.time}</span>
         </div>
         {ride.fare.surge > 0 && (
           <div className="mt-2 flex justify-between text-sm">
             <span className="text-muted-foreground">Surge</span>
-            <span className="text-foreground">₹{ride.fare.surge}</span>
+            <span className="font-mono text-foreground">₹{ride.fare.surge}</span>
           </div>
         )}
         {ride.fare.promoDiscount > 0 && (
           <div className="mt-2 flex justify-between text-sm">
             <span className="text-success">Promo discount</span>
-            <span className="text-success">-₹{ride.fare.promoDiscount}</span>
+            <span className="font-mono text-success">-₹{ride.fare.promoDiscount}</span>
           </div>
         )}
         {Boolean(ride.tip) && (
           <div className="mt-2 flex justify-between text-sm">
             <span className="text-muted-foreground">Tip</span>
-            <span className="text-foreground">₹{ride.tip}</span>
+            <span className="font-mono text-foreground">₹{ride.tip}</span>
           </div>
         )}
-        <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+        <div className="mt-3 flex items-center justify-between rounded-xl bg-primary/5 p-3">
           <span className="font-display text-base font-semibold text-foreground">Total paid</span>
-          <FareBadge amount={ride.fare.total + (ride.tip ?? 0)} className="text-lg" />
+          <FareBadge amount={totalPaid} className="text-lg text-primary" />
         </div>
-      </div>
-    </div>
+      </Card>
+    </PageTransition>
   );
 }

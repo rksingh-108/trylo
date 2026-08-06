@@ -4,6 +4,7 @@ import { db } from "../db";
 import { createOtpChallenge, verifyOtpChallenge } from "../auth/otp";
 import { signToken } from "../auth/jwt";
 import { requireAuth } from "../auth/middleware";
+import { issueRefreshToken } from "../auth/refreshToken";
 import { serializeDriver, serializeKycDocument } from "../lib/serialize";
 import { CITY_CENTER, jitter } from "../lib/geo";
 import { autoVerifyPendingDocs } from "../lib/kyc";
@@ -57,7 +58,8 @@ router.post("/otp/verify", async (req, res) => {
   }
 
   const token = signToken({ sub: driver.id, role: "driver" });
-  res.json({ success: true, isNewDriver, driver: serializeDriver(driver), token });
+  const refreshToken = await issueRefreshToken(driver.id, "driver", req.headers["user-agent"]);
+  res.json({ success: true, isNewDriver, driver: serializeDriver(driver), token, refreshToken });
 });
 
 const vehicleSchema = z.object({

@@ -18,7 +18,11 @@ export const SheetOverlay = React.forwardRef<
   React.ElementRef<typeof DrawerPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
-  <DrawerPrimitive.Overlay ref={ref} className={cn("fixed inset-0 z-50 bg-neutral-950/50", className)} {...props} />
+  <DrawerPrimitive.Overlay
+    ref={ref}
+    className={cn("fixed inset-0 z-50 bg-[hsl(var(--scrim)/0.45)] backdrop-blur-[2px]", className)}
+    {...props}
+  />
 ));
 SheetOverlay.displayName = "SheetOverlay";
 
@@ -31,12 +35,12 @@ export const SheetContent = React.forwardRef<
     <DrawerPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)]",
+        "fixed inset-x-0 bottom-0 z-50 mx-auto flex max-h-[92vh] w-full max-w-md flex-col rounded-t-[1.75rem] border-t border-border bg-card shadow-elevation-4 pb-[env(safe-area-inset-bottom)]",
         className
       )}
       {...props}
     >
-      <div className="mx-auto mt-3 h-1.5 w-10 shrink-0 rounded-full bg-muted" />
+      <div className="mx-auto mt-3 h-1.5 w-10 shrink-0 rounded-full bg-muted-foreground/25" />
       <div className="flex-1 overflow-y-auto px-5 pb-6 pt-4">{children}</div>
     </DrawerPrimitive.Content>
   </SheetPortal>

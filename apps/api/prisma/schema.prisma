@@ -78,6 +78,11 @@ enum OtpPurpose {
   driver
 }
 
+enum OwnerRole {
+  customer
+  driver
+}
+
 model User {
   id            String   @id @default(cuid())
   phone         String   @unique
@@ -110,6 +115,11 @@ model Driver {
   lat                 Float
   lng                 Float
   createdAt           DateTime                  @default(now())
+
+  // Matching-engine signals: acceptance rate and idle time, alongside distance and rating.
+  offeredCount    Int       @default(0)
+  acceptedCount   Int       @default(0)
+  lastRideEndedAt DateTime?
 
   kycDocuments  KycDocument[]
   rides         Ride[]
@@ -171,9 +181,22 @@ model Ride {
   rating Int?
   tip    Int?
 
+  statusHistory RideStatusHistory[]
+
   @@index([riderId])
   @@index([driverId])
   @@index([status])
+}
+
+model RideStatusHistory {
+  id        String     @id @default(cuid())
+  rideId    String
+  ride      Ride       @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  status    RideStatus
+  note      String?
+  createdAt DateTime   @default(now())
+
+  @@index([rideId])
 }
 
 model SavedPlace {
@@ -234,7 +257,46 @@ model OtpChallenge {
   code      String
   expiresAt DateTime
   consumed  Boolean    @default(false)
+  attempts  Int        @default(0)
   createdAt DateTime   @default(now())
 
   @@index([phone, purpose])
+}
+
+/// Refresh-token session, one row per logged-in device. The access token itself is
+/// never stored (it's a short-lived stateless JWT); only the refresh token is
+/// persisted, and only as a hash, so a DB read never exposes a usable token.
+model Session {
+  id               String    @id @default(cuid())
+  ownerId          String
+  ownerRole        OwnerRole
+  refreshTokenHash String    @unique
+  userAgent        String?
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+
+  @@index([ownerId, ownerRole])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  ownerId   String
+  ownerRole OwnerRole
+  title     String
+  body      String
+  read      Boolean   @default(false)
+  createdAt DateTime  @default(now())
+
+  @@index([ownerId, ownerRole, read])
+}
+
+model PromoCode {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  discountPercent Int
+  maxDiscount     Int?
+  active          Boolean   @default(true)
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
 }

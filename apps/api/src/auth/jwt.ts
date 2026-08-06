@@ -8,8 +8,11 @@ export interface TokenPayload {
   role: Role;
 }
 
+// Short-lived on purpose: the client refreshes it via /api/auth/refresh using a
+// longer-lived refresh token (see auth/refreshToken.ts), so a leaked access
+// token has a small blast-radius window instead of staying valid for 30 days.
 export function signToken(payload: TokenPayload): string {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: "30d" });
+  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: "15m" });
 }
 
 export function verifyToken(token: string): TokenPayload | null {

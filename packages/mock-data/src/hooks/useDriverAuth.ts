@@ -72,3 +72,10 @@ export function useVerificationStatus() {
     refetchIntervalInBackground: true,
   });
 }
+
+/** Revokes the session server-side and clears local tokens; caller still owns navigation/cache-clear. */
+export function useLogoutDriver() {
+  return useMutation({
+    mutationFn: driverAuthService.logoutDriver,
+  });
+}

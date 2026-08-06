@@ -1,6 +1,6 @@
 import type { User } from "@trylo/types";
 import { apiClient } from "../apiClient";
-import { getToken, setToken } from "../tokenStore";
+import { clearToken, getRefreshToken, getToken, setTokens } from "../tokenStore";
 
 export interface OtpRequestResult {
   requestId: string;
@@ -19,18 +19,27 @@ export interface VerifyOtpResult {
 }
 
 export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResult> {
-  const result = await apiClient.post<VerifyOtpResult & { token?: string }>(
+  const result = await apiClient.post<VerifyOtpResult & { token?: string; refreshToken?: string }>(
     "/api/customer/auth/otp/verify",
     { phone, otp }
   );
-  if (result.success && result.token) {
-    setToken(result.token);
+  if (result.success && result.token && result.refreshToken) {
+    setTokens(result.token, result.refreshToken);
   }
   return result;
 }
 
 export async function completeProfile(input: { name: string; email?: string }): Promise<User> {
   return apiClient.post<User>("/api/customer/auth/profile", input);
+}
+
+/** Revokes the refresh-token session server-side, then clears local tokens. Best-effort. */
+export async function logout(): Promise<void> {
+  const refreshToken = getRefreshToken();
+  if (refreshToken) {
+    await apiClient.post("/api/auth/logout", { refreshToken }).catch(() => {});
+  }
+  clearToken();
 }
 
 export async function getCurrentUser(): Promise<User | null> {

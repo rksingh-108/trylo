@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button, OtpInput } from "@trylo/ui";
+import { ShieldCheck } from "lucide-react";
+import { Button, OtpInput, PageTransition } from "@trylo/ui";
 import { useRequestDriverOtp, useVerifyDriverOtp } from "@trylo/mock-data/hooks";
 import { otpSchema } from "@/lib/validation";
 
@@ -62,15 +63,20 @@ function OtpForm() {
   }
 
   return (
-    <div className="flex flex-1 flex-col justify-between px-6 pb-8 pt-16">
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-foreground">Enter the code</h1>
+    <PageTransition className="relative flex flex-1 flex-col justify-between overflow-hidden px-6 pb-8 pt-16">
+      <div className="pointer-events-none absolute -right-20 -top-16 h-64 w-64 rounded-full bg-primary/15 blur-[90px]" />
+
+      <div className="relative">
+        <span className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
+          <ShieldCheck size={24} />
+        </span>
+        <h1 className="mt-6 font-display text-2xl font-semibold text-foreground">Enter the code</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           We sent a 4-digit code to <span className="font-medium text-foreground">+91 {phone}</span>
         </p>
       </div>
 
-      <div className="flex flex-col items-center gap-6">
+      <div className="relative flex flex-col items-center gap-6">
         <OtpInput length={4} value={otp} onChange={handleOtpChange} autoFocus disabled={verifyOtp.isPending} />
         {error && <p className="text-sm text-destructive">{error}</p>}
         {devHint && !error && (
@@ -78,20 +84,20 @@ function OtpForm() {
         )}
       </div>
 
-      <div className="flex flex-col gap-4">
-        <Button size="lg" onClick={() => handleVerify(otp)} disabled={verifyOtp.isPending || otp.length < 4}>
+      <div className="relative flex flex-col gap-4">
+        <Button size="lg" variant="glow" onClick={() => handleVerify(otp)} disabled={verifyOtp.isPending || otp.length < 4}>
           {verifyOtp.isPending ? "Verifying..." : "Verify & Continue"}
         </Button>
         <button
           type="button"
           onClick={handleResend}
           disabled={requestOtp.isPending}
-          className="text-center text-sm font-medium text-primary disabled:opacity-50"
+          className="text-center text-sm font-medium text-primary transition-opacity hover:opacity-80 disabled:opacity-50"
         >
           Resend code
         </button>
       </div>
-    </div>
+    </PageTransition>
   );
 }
 

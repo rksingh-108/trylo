@@ -199,7 +199,7 @@ async function run() {
   const driverMe = await api<{ id: string }>("/api/driver/auth/me", { token: driverToken });
   const driverId = driverMe.data.id;
 
-  const driverSocket = io(API, { transports: ["websocket"] });
+  const driverSocket = io(API, { transports: ["websocket"], auth: { token: driverToken } });
   await new Promise<void>((resolve) => driverSocket.on("connect", () => resolve()));
   driverSocket.emit("join:driver", driverId);
   let socketOffer: { ride: { id: string } } | null = null;
@@ -236,7 +236,7 @@ async function run() {
   assert(rideRes.status === 200 && rideRes.data.status === "requested", "ride created with status 'requested'");
   const rideId = rideRes.data.id;
 
-  const customerSocket = io(API, { transports: ["websocket"] });
+  const customerSocket = io(API, { transports: ["websocket"], auth: { token: customerToken } });
   await new Promise<void>((resolve) => customerSocket.on("connect", () => resolve()));
   customerSocket.emit("join:ride", rideId);
   let lastRideUpdate: { status: string } | null = null;

@@ -5,6 +5,7 @@ import { requireAuth } from "../auth/middleware";
 import { haversineKm } from "../lib/geo";
 import { serializeRide } from "../lib/serialize";
 import { emitRequestCleared, emitRideUpdated } from "../realtime/io";
+import { recordRideStatus } from "../lib/rideHistory";
 
 const router = Router();
 
@@ -75,6 +76,7 @@ router.post("/", requireAuth("customer"), async (req, res) => {
     },
     include: { driver: true, rider: true },
   });
+  await recordRideStatus(ride.id, "requested");
 
   res.json(serializeRide(ride));
 });
@@ -132,6 +134,7 @@ router.post("/:id/cancel", requireAuth("customer"), async (req, res) => {
     },
     include: { driver: true, rider: true },
   });
+  await recordRideStatus(updated.id, "cancelled", updated.cancelReason ?? undefined);
 
   emitRideUpdated(updated.id, serializeRide(updated));
   if (updated.driverId) emitRequestCleared(updated.driverId);

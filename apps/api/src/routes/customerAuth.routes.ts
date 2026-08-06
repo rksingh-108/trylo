@@ -4,6 +4,7 @@ import { db } from "../db";
 import { createOtpChallenge, verifyOtpChallenge } from "../auth/otp";
 import { signToken } from "../auth/jwt";
 import { requireAuth } from "../auth/middleware";
+import { issueRefreshToken } from "../auth/refreshToken";
 import { defaultPaymentMethods, defaultSavedPlaces } from "../lib/addresses";
 
 const router = Router();
@@ -42,11 +43,13 @@ router.post("/otp/verify", async (req, res) => {
   }
 
   const token = signToken({ sub: user.id, role: "customer" });
+  const refreshToken = await issueRefreshToken(user.id, "customer", req.headers["user-agent"]);
   res.json({
     success: true,
     isNewUser,
     user: { id: user.id, phone: user.phone, name: user.name, email: user.email ?? undefined, rating: user.rating, createdAt: user.createdAt.toISOString() },
     token,
+    refreshToken,
   });
 });
 

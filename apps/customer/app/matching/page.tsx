@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Car, MessageCircle, Phone, X } from "lucide-react";
-import { Avatar, AvatarFallback, Button, FareBadge, RatingStars } from "@trylo/ui";
+import { Avatar, AvatarFallback, AvatarImage, Button, FareBadge, RatingStars } from "@trylo/ui";
 import { useCancelRide, useRideStatus } from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
 
@@ -16,6 +16,18 @@ function initials(name: string) {
     .join("")
     .toUpperCase();
 }
+
+const matchedContainer = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: 0.08, delayChildren: 0.05 },
+  },
+};
+
+const matchedItem = {
+  hidden: { opacity: 0, y: 14 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, damping: 24, stiffness: 260 } },
+};
 
 export default function MatchingPage() {
   const router = useRouter();
@@ -41,28 +53,53 @@ export default function MatchingPage() {
   const driver = ride?.driver;
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="flex flex-1 flex-col overflow-hidden">
       <AnimatePresence>
         {isSearching ? (
           <motion.div
             key="searching"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.25 } }}
+            transition={{ duration: 0.3 }}
             className="flex flex-1 flex-col items-center justify-center gap-8 px-6 text-center"
           >
-            <div className="relative flex h-40 w-40 items-center justify-center">
-              <span className="absolute inset-0 animate-pulse-ring rounded-full bg-primary/20" />
-              <span className="absolute inset-0 animate-pulse-ring rounded-full bg-primary/20 [animation-delay:0.6s]" />
-              <span className="absolute inset-0 animate-pulse-ring rounded-full bg-primary/20 [animation-delay:1.2s]" />
-              <span className="relative grid h-16 w-16 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg">
+            <div className="relative flex h-48 w-48 items-center justify-center">
+              {/* concentric pulse rings */}
+              <span className="absolute inset-0 animate-pulse-ring rounded-full bg-primary/15" />
+              <span className="absolute inset-0 animate-pulse-ring rounded-full bg-primary/15 [animation-delay:0.6s]" />
+              <span className="absolute inset-0 animate-pulse-ring rounded-full bg-primary/15 [animation-delay:1.2s]" />
+
+              {/* rotating scan sweep */}
+              <motion.span
+                aria-hidden
+                className="absolute inset-2 rounded-full"
+                style={{
+                  background:
+                    "conic-gradient(from 0deg, transparent 0%, hsl(var(--primary)/0.55) 18%, transparent 42%)",
+                }}
+                animate={{ rotate: 360 }}
+                transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }}
+              />
+
+              <span className="absolute inset-6 rounded-full bg-background shadow-elevation-2" />
+
+              <motion.span
+                className="relative grid h-16 w-16 place-items-center rounded-full bg-primary text-primary-foreground shadow-glow"
+                animate={{ y: [0, -4, 0] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+              >
                 <Car size={26} />
-              </span>
+              </motion.span>
             </div>
-            <div>
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+            >
               <h1 className="font-display text-xl font-semibold text-foreground">Finding your driver</h1>
-              <p className="mt-1 text-sm text-muted-foreground">Hang tight, matching you with nearby drivers...</p>
-            </div>
+              <p className="mt-1 text-sm text-muted-foreground">Hang tight, matching you with nearby drivers…</p>
+            </motion.div>
             <Button variant="outline" onClick={handleCancel} disabled={cancelRide.isPending}>
               <X size={16} />
               Cancel ride
@@ -71,51 +108,66 @@ export default function MatchingPage() {
         ) : driver ? (
           <motion.div
             key="matched"
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: "spring", damping: 22, stiffness: 220 }}
-            className="mt-auto flex flex-col gap-5 rounded-t-2xl border-t border-border bg-card px-6 pb-8 pt-6"
+            variants={matchedContainer}
+            initial="hidden"
+            animate="show"
+            className="mt-auto flex flex-col gap-5 rounded-t-[1.75rem] border-t border-border bg-card px-6 pb-8 pt-6 shadow-elevation-4"
           >
-            <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-success" />
+            <motion.div variants={matchedItem} className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success/60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+              </span>
               <p className="text-sm font-medium text-success">Driver on the way</p>
-            </div>
+            </motion.div>
 
-            <div className="flex items-center gap-4">
-              <Avatar className="h-16 w-16">
-                <AvatarFallback>{initials(driver.name)}</AvatarFallback>
-              </Avatar>
-              <div className="flex-1">
-                <p className="font-display text-lg font-semibold text-foreground">{driver.name}</p>
+            <motion.div variants={matchedItem} className="flex items-center gap-4">
+              <motion.div
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", damping: 14, stiffness: 260, delay: 0.1 }}
+                className="relative shrink-0"
+              >
+                <span className="absolute -inset-1.5 rounded-full bg-primary/25 blur-md" />
+                <Avatar className="relative h-16 w-16 border-2 border-background shadow-elevation-2">
+                  {driver.avatarUrl && <AvatarImage src={driver.avatarUrl} alt={driver.name} />}
+                  <AvatarFallback>{initials(driver.name)}</AvatarFallback>
+                </Avatar>
+              </motion.div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-display text-lg font-semibold text-foreground">{driver.name}</p>
                 <RatingStars value={driver.rating} size={14} />
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 truncate text-sm text-muted-foreground">
                   {driver.vehicle.color} {driver.vehicle.make} {driver.vehicle.model}
                 </p>
               </div>
-              <div className="text-right">
+              <div className="shrink-0 text-right">
                 <p className="font-mono text-2xl font-semibold text-foreground">{driver.etaMinutes}</p>
                 <p className="text-xs text-muted-foreground">min away</p>
               </div>
-            </div>
+            </motion.div>
 
-            <div className="flex items-center justify-between rounded-lg bg-muted px-4 py-3">
+            <motion.div
+              variants={matchedItem}
+              className="flex items-center justify-between rounded-lg bg-muted px-4 py-3"
+            >
               <span className="font-mono text-sm font-medium tracking-widest text-foreground">
                 {driver.vehicle.registrationNumber}
               </span>
               {ride && <FareBadge amount={ride.fare.total} />}
-            </div>
+            </motion.div>
 
-            <div className="flex gap-3">
+            <motion.div variants={matchedItem} className="flex gap-3">
               <Button variant="outline" size="icon" className="shrink-0" aria-label="Call driver">
                 <Phone size={18} />
               </Button>
               <Button variant="outline" size="icon" className="shrink-0" aria-label="Message driver">
                 <MessageCircle size={18} />
               </Button>
-              <Button size="lg" className="flex-1" onClick={() => router.push("/ride")}>
+              <Button variant="glow" size="lg" className="flex-1" onClick={() => router.push("/ride")}>
                 Track ride
               </Button>
-            </div>
+            </motion.div>
           </motion.div>
         ) : null}
       </AnimatePresence>

@@ -5,6 +5,7 @@ import { db } from "../db";
 import { requireAuth } from "../auth/middleware";
 import { serializeDriver, serializeRide } from "../lib/serialize";
 import { emitRideUpdated } from "../realtime/io";
+import { recordRideStatus } from "../lib/rideHistory";
 
 const router = Router();
 
@@ -77,6 +78,8 @@ router.post("/requests/:rideId/accept", requireAuth("driver"), async (req, res) 
     data: { status: "arriving", acceptedAt: new Date(), offerExpiresAt: null },
     include: { driver: true, rider: true },
   });
+  await db.driver.update({ where: { id: req.auth!.id }, data: { acceptedCount: { increment: 1 } } });
+  await recordRideStatus(updated.id, "arriving");
   emitRideUpdated(updated.id, serializeRide(updated));
   res.json(serializeRide(updated));
 });
@@ -129,6 +132,7 @@ router.post("/rides/:rideId/verify-otp", requireAuth("driver"), async (req, res)
     data: { status: "in_progress", startedAt: new Date() },
     include: { driver: true, rider: true },
   });
+  await recordRideStatus(updated.id, "in_progress");
   emitRideUpdated(updated.id, serializeRide(updated));
   res.json({ success: true, ride: serializeRide(updated) });
 });
@@ -148,7 +152,11 @@ router.post("/rides/:rideId/end", requireAuth("driver"), async (req, res) => {
     include: { driver: true, rider: true },
   });
 
-  await db.driver.update({ where: { id: req.auth!.id }, data: { totalRides: { increment: 1 } } });
+  await db.driver.update({
+    where: { id: req.auth!.id },
+    data: { totalRides: { increment: 1 }, lastRideEndedAt: new Date() },
+  });
+  await recordRideStatus(updated.id, "completed");
 
   const rider = await db.user.findUnique({ where: { id: updated.riderId } });
   if (rider && rider.walletBalance >= updated.fareTotal) {

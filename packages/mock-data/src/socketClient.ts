@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import { getToken } from "./tokenStore";
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -7,7 +8,18 @@ let socket: Socket | null = null;
 function getSocket(): Socket | null {
   if (typeof window === "undefined") return null;
   if (!socket) {
-    socket = io(SOCKET_URL, { transports: ["websocket", "polling"] });
+    socket = io(SOCKET_URL, {
+      transports: ["websocket", "polling"],
+      // Function form so the *current* access token is sent on every connect
+      // and reconnect attempt, not just whatever was valid when the socket
+      // was first created (the access token is short-lived and rotates via
+      // the apiClient's silent refresh — see apiClient.ts).
+      auth: (cb) => cb({ token: getToken() }),
+    });
+  } else if (!socket.connected) {
+    // A prior connection attempt may have been rejected (e.g. no token yet
+    // at first page load, before login). Re-trigger with the latest token.
+    socket.connect();
   }
   return socket;
 }
