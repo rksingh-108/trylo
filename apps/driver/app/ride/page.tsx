@@ -16,6 +16,7 @@ import {
   RatingStars,
   Skeleton,
   StatusPill,
+  WaitingTimer,
 } from "@trylo/ui";
 import type { RouteInfo } from "@trylo/ui";
 import { useActiveDriverRide, useEndRide, useReportLiveLocation, useVerifyRiderOtp } from "@trylo/mock-data/hooks";
@@ -96,6 +97,7 @@ export default function ActiveRidePage() {
   if (!ride) return <RideLoadingSkeleton />;
 
   const isArriving = ride.status === "arriving";
+  const isArrived = ride.status === "arrived";
   const isInProgress = ride.status === "in_progress";
 
   return (
@@ -107,7 +109,8 @@ export default function ActiveRidePage() {
           drop={ride.drop.point}
           liveMarker={liveGpsLocation ?? ride.driver?.location}
           showRoute
-          followLive={isArriving || isInProgress}
+          followLive={isArriving || isArrived || isInProgress}
+          liveMarkerWaiting={isArrived}
           onRouteInfo={setRouteInfo}
         />
         <div className="absolute left-4 top-4">
@@ -172,7 +175,21 @@ export default function ActiveRidePage() {
           </CardContent>
         </Card>
 
-        {isArriving && (
+        {isArrived && (
+          <Card variant="glass" className="mt-4 animate-scale-in">
+            <CardContent className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">
+                  <Clock3 size={18} />
+                </span>
+                <p className="text-sm font-semibold text-foreground">Waiting Time</p>
+              </div>
+              <WaitingTimer anchorIso={ride.arrivedAt} label="" />
+            </CardContent>
+          </Card>
+        )}
+
+        {isArrived && (
           <Card variant="glass" className="mt-4 animate-scale-in">
             <CardContent className="p-5">
               <div className="flex items-center gap-3">

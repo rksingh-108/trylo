@@ -76,6 +76,7 @@ export function serializeRide(ride: RideWithRelations): Ride {
     durationMin: ride.durationMin,
     requestedAt: ride.requestedAt.toISOString(),
     matchedAt: ride.acceptedAt?.toISOString(),
+    arrivedAt: ride.arrivedAt?.toISOString(),
     startedAt: ride.startedAt?.toISOString(),
     completedAt: ride.completedAt?.toISOString(),
     cancelledAt: ride.cancelledAt?.toISOString(),

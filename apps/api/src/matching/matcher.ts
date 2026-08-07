@@ -11,7 +11,7 @@ const TICK_MS = 1_000;
 // silently sitting in "requested" forever with no signal to the rider.
 const MAX_MATCH_ATTEMPTS = 8;
 
-const ACTIVE_DRIVER_STATUSES = ["requested", "arriving", "in_progress"] as const;
+const ACTIVE_DRIVER_STATUSES = ["requested", "arriving", "arrived", "in_progress"] as const;
 
 async function expireStaleOffers() {
   const stale = await db.ride.findMany({

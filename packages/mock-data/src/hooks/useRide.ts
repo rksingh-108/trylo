@@ -7,10 +7,11 @@ import * as rideService from "../services/ride.service";
 import { queryKeys } from "./queryKeys";
 import { joinRideRoom, leaveRideRoom, onDriverLocation, onRideUpdated } from "../socketClient";
 
-export function useActiveRide() {
+export function useActiveRide(enabled = true) {
   return useQuery({
     queryKey: queryKeys.activeRide,
     queryFn: rideService.getActiveRide,
+    enabled,
   });
 }
 

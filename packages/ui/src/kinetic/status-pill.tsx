@@ -4,6 +4,7 @@ export type KineticStatus =
   | "requested"
   | "matched"
   | "arriving"
+  | "arrived"
   | "in_progress"
   | "completed"
   | "cancelled"
@@ -16,7 +17,8 @@ export type KineticStatus =
 const STATUS_CONFIG: Record<KineticStatus, { label: string; className: string }> = {
   requested: { label: "Finding driver", className: "bg-amber-100 text-amber-700" },
   matched: { label: "Driver matched", className: "bg-teal-100 text-teal-700" },
-  arriving: { label: "Driver arriving", className: "bg-teal-100 text-teal-700" },
+  arriving: { label: "Driver is arriving", className: "bg-teal-100 text-teal-700" },
+  arrived: { label: "Driver has arrived", className: "bg-primary/15 text-primary" },
   in_progress: { label: "On trip", className: "bg-primary/15 text-primary" },
   completed: { label: "Completed", className: "bg-success/15 text-success" },
   cancelled: { label: "Cancelled", className: "bg-destructive/15 text-destructive" },

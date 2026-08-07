@@ -5,6 +5,7 @@ export type RideStatus =
   | "requested"
   | "matched"
   | "arriving"
+  | "arrived"
   | "in_progress"
   | "completed"
   | "cancelled";
@@ -37,6 +38,7 @@ export interface Ride {
   durationMin: number;
   requestedAt: string;
   matchedAt?: string;
+  arrivedAt?: string;
   startedAt?: string;
   completedAt?: string;
   cancelledAt?: string;

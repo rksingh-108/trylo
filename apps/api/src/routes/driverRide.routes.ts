@@ -6,8 +6,12 @@ import { requireAuth } from "../auth/middleware";
 import { serializeDriver, serializeRide } from "../lib/serialize";
 import { emitDriverLocation, emitRideUpdated } from "../realtime/io";
 import { recordRideStatus } from "../lib/rideHistory";
+import { haversineKm } from "../lib/geo";
 
 const router = Router();
+
+/** How close (in meters) the driver's GPS needs to be to the pickup point before we auto-mark arrival. */
+const ARRIVAL_RADIUS_METERS = 50;
 
 router.post("/status", requireAuth("driver"), async (req, res) => {
   const parsed = z.object({ isOnline: z.boolean() }).safeParse(req.body);
@@ -37,10 +41,26 @@ router.post("/location", requireAuth("driver"), async (req, res) => {
   });
 
   const activeRide = await db.ride.findFirst({
-    where: { driverId: driver.id, status: { in: ["arriving", "in_progress"] } },
-    select: { id: true },
+    where: { driverId: driver.id, status: { in: ["arriving", "arrived", "in_progress"] } },
   });
-  if (activeRide) emitDriverLocation(activeRide.id, { lat: parsed.data.lat, lng: parsed.data.lng });
+
+  if (activeRide) {
+    emitDriverLocation(activeRide.id, { lat: parsed.data.lat, lng: parsed.data.lng });
+
+    if (activeRide.status === "arriving") {
+      const distanceMeters =
+        haversineKm(parsed.data, { lat: activeRide.pickupLat, lng: activeRide.pickupLng }) * 1000;
+      if (distanceMeters <= ARRIVAL_RADIUS_METERS) {
+        const arrived = await db.ride.update({
+          where: { id: activeRide.id },
+          data: { status: "arrived", arrivedAt: new Date() },
+          include: { driver: true, rider: true },
+        });
+        await recordRideStatus(arrived.id, "arrived");
+        emitRideUpdated(arrived.id, serializeRide(arrived));
+      }
+    }
+  }
 
   res.json(serializeDriver(driver));
 });
@@ -121,7 +141,7 @@ router.post("/requests/:rideId/reject", requireAuth("driver"), async (req, res) 
 
 router.get("/rides/active", requireAuth("driver"), async (req, res) => {
   const ride = await db.ride.findFirst({
-    where: { driverId: req.auth!.id, status: { in: ["arriving", "in_progress"] } },
+    where: { driverId: req.auth!.id, status: { in: ["arriving", "arrived", "in_progress"] } },
     include: { driver: true, rider: true },
     orderBy: { requestedAt: "desc" },
   });

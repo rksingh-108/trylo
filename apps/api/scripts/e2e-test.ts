@@ -275,6 +275,59 @@ async function run() {
   );
   const rideOtp = customerRideView.data.otp;
 
+  // ---- Driver location far from pickup: should NOT trigger arrival ----
+  console.log("\n=== Driver location far from pickup (no arrival yet) ===");
+  const farLocation = await api("/api/driver/location", {
+    method: "POST",
+    token: driverToken,
+    body: { lat: pickup.point.lat + 0.05, lng: pickup.point.lng + 0.05 }, // ~7.8km away
+  });
+  assert(farLocation.status === 200, "driver location updated (far from pickup)");
+
+  const stillArriving = await api<{ status: string }>(`/api/customer/rides/${rideId}/status`, {
+    token: customerToken,
+  });
+  assert(stillArriving.data.status === "arriving", "ride still 'arriving' — driver not yet within arrival radius");
+
+  // ---- Driver location within the arrival radius: should auto-transition to 'arrived' ----
+  console.log("\n=== Driver arrives at pickup (GPS within radius) ===");
+  lastRideUpdate = null;
+  const nearLocation = await api("/api/driver/location", {
+    method: "POST",
+    token: driverToken,
+    body: { lat: pickup.point.lat, lng: pickup.point.lng },
+  });
+  assert(nearLocation.status === 200, "driver location updated (at pickup)");
+
+  await waitFor(async () => lastRideUpdate?.status === "arrived", "customer receives realtime update: arrived", 5000);
+  log("customer socket received arrived update", true);
+
+  const arrivedView = await api<{ status: string; arrivedAt?: string }>(
+    `/api/customer/rides/${rideId}/status`,
+    { token: customerToken }
+  );
+  assert(
+    arrivedView.data.status === "arrived" && !!arrivedView.data.arrivedAt,
+    "customer REST view shows 'arrived' with an arrivedAt timestamp"
+  );
+  const firstArrivedAt = arrivedView.data.arrivedAt;
+
+  // ---- Idempotency: another location ping within radius shouldn't re-trigger or reset arrivedAt ----
+  await sleep(300);
+  await api("/api/driver/location", {
+    method: "POST",
+    token: driverToken,
+    body: { lat: pickup.point.lat, lng: pickup.point.lng },
+  });
+  const arrivedAgain = await api<{ status: string; arrivedAt?: string }>(
+    `/api/customer/rides/${rideId}/status`,
+    { token: customerToken }
+  );
+  assert(
+    arrivedAgain.data.status === "arrived" && arrivedAgain.data.arrivedAt === firstArrivedAt,
+    "repeated location pings while waiting don't re-trigger arrival or reset arrivedAt"
+  );
+
   // ---- Driver verifies rider OTP -> in_progress ----
   console.log("\n=== Driver verifies rider OTP ===");
   const otpVerify = await api<{ success: boolean; ride: { status: string } }>(

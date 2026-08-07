@@ -36,6 +36,8 @@ export interface PremiumMapProps {
    * pans/drags the map, and resumes a few seconds after they let go.
    */
   followLive?: boolean;
+  /** Shows a subtle secondary pulse ring around the live marker — e.g. while the driver is waiting at pickup. */
+  liveMarkerWaiting?: boolean;
   onRouteInfo?: (info: RouteInfo) => void;
   /** Fires whenever the camera settles on a new center — panning, `flyTo`, or the current-location button. Used by the map location picker. */
   onCenterChange?: (point: MapGeoPoint) => void;
@@ -200,12 +202,16 @@ function pinHtml(tone: "pickup" | "drop"): string {
   `;
 }
 
-function liveDotHtml(): string {
+function liveDotHtml(waiting: boolean): string {
   const icon = renderToStaticMarkup(<Navigation size={11} color="#fff" fill="#fff" />);
+  const waitingRing = waiting
+    ? `<span class="trylo-pulse-ring trylo-pulse-ring-slow" style="position:absolute;inset:-16px;border-radius:9999px;background:hsl(var(--primary) / 0.3)"></span>`
+    : "";
   return `
     <div>
       <div class="trylo-live-enter" style="position:relative">
         <span class="trylo-pulse-ring" style="position:absolute;inset:-8px;border-radius:9999px;background:hsl(var(--primary) / 0.5)"></span>
+        ${waitingRing}
         <span style="position:relative;display:grid;place-items:center;height:24px;width:24px;border-radius:9999px;border:2px solid white;background:hsl(var(--primary));box-shadow:0 4px 14px rgba(0,0,0,0.25)">
           ${icon}
         </span>
@@ -239,6 +245,8 @@ async function fetchOsrmRoute(
 interface MarkerOptions {
   rotation?: number;
   rotationAlignment?: "map" | "viewport" | "auto";
+  /** Changing this forces the marker's DOM element to be torn down and recreated from `html` — used when a marker's visual variant (e.g. waiting state) changes, since updates otherwise only reposition the existing element. */
+  variantKey?: string;
 }
 
 /** Adds/updates a single marker on the map, reusing the same Marker instance across position updates. */
@@ -251,7 +259,9 @@ function useMapMarker(
   options?: MarkerOptions
 ) {
   const markerRef = React.useRef<maplibregl.Marker | null>(null);
+  const variantRef = React.useRef<string | undefined>(undefined);
   const rotation = options?.rotation;
+  const variantKey = options?.variantKey;
 
   React.useEffect(() => {
     if (!map || !ready) return;
@@ -259,6 +269,10 @@ function useMapMarker(
       markerRef.current?.remove();
       markerRef.current = null;
       return;
+    }
+    if (markerRef.current && variantRef.current !== variantKey) {
+      markerRef.current.remove();
+      markerRef.current = null;
     }
     if (!markerRef.current) {
       const el = document.createElement("div");
@@ -271,12 +285,13 @@ function useMapMarker(
       })
         .setLngLat(toLngLat(position))
         .addTo(map);
+      variantRef.current = variantKey;
     } else {
       markerRef.current.setLngLat(toLngLat(position));
       if (typeof rotation === "number") markerRef.current.setRotation(rotation);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, ready, position?.lat, position?.lng, rotation]);
+  }, [map, ready, position?.lat, position?.lng, rotation, variantKey]);
 
   React.useEffect(
     () => () => {
@@ -348,6 +363,7 @@ export function PremiumMap({
   interactive = true,
   showCurrentLocationButton = true,
   followLive = false,
+  liveMarkerWaiting = false,
   onRouteInfo,
   onCenterChange,
   children,
@@ -405,7 +421,11 @@ export function PremiumMap({
 
   useMapMarker(map, ready, pickup, pinHtml("pickup"), "bottom");
   useMapMarker(map, ready, drop, pinHtml("drop"), "bottom");
-  useMapMarker(map, ready, smoothLive, liveDotHtml(), "center", { rotation: heading, rotationAlignment: "map" });
+  useMapMarker(map, ready, smoothLive, liveDotHtml(liveMarkerWaiting), "center", {
+    rotation: heading,
+    rotationAlignment: "map",
+    variantKey: liveMarkerWaiting ? "waiting" : "normal",
+  });
 
   // Route + ETA via OSRM, drawn as a GeoJSON line layer that fades in smoothly.
   React.useEffect(() => {
@@ -555,6 +575,7 @@ export function PremiumMap({
       <style>{`
         .trylo-pulse-ring { animation: trylo-pulse-ring 1.8s cubic-bezier(0.4,0,0.2,1) infinite; }
         @keyframes trylo-pulse-ring { 0% { transform: scale(0.8); opacity: 0.8; } 80%,100% { transform: scale(1.8); opacity: 0; } }
+        .trylo-pulse-ring-slow { animation: trylo-pulse-ring 2.6s cubic-bezier(0.4,0,0.2,1) infinite; animation-delay: 0.5s; }
         .trylo-pin-drop { animation: trylo-pin-drop 480ms cubic-bezier(0.34,1.56,0.64,1) both; }
         @keyframes trylo-pin-drop {
           0% { transform: translateY(-28px) scale(0.5); opacity: 0; }

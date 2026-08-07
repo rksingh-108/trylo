@@ -26,6 +26,7 @@ export * from "./kinetic/location-search-sheet";
 export * from "./kinetic/map-location-picker";
 export * from "./kinetic/empty-state";
 export * from "./kinetic/page-transition";
+export * from "./kinetic/waiting-timer";
 
 export * from "./theme/theme-provider";
 export * from "./theme/theme-toggle";

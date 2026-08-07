@@ -19,9 +19,10 @@ import {
   SheetTitle,
   Skeleton,
   StatusPill,
+  WaitingTimer,
   type RouteInfo,
 } from "@trylo/ui";
-import { useDriverLiveLocation, useRideStatus } from "@trylo/mock-data/hooks";
+import { useActiveRide, useDriverLiveLocation, useRideStatus } from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
 
 function initials(name: string) {
@@ -70,15 +71,24 @@ function RideLoadingSkeleton() {
 
 export default function LiveRidePage() {
   const router = useRouter();
-  const { activeRideId } = useBookingStore();
+  const { activeRideId, setActiveRideId } = useBookingStore();
+  // A hard refresh wipes the in-memory booking store, so `activeRideId` may be
+  // unknown even though the rider genuinely has a ride in flight server-side.
+  // Rehydrate it from the server before giving up and bouncing to /home — this
+  // is what lets the waiting timer (anchored to the server's `arrivedAt`) keep
+  // counting correctly across a refresh instead of losing the ride entirely.
+  const { data: rehydratedRide, isFetched: rehydrationFetched } = useActiveRide(!activeRideId);
   const { data: ride } = useRideStatus(activeRideId);
   const liveDriverLocation = useDriverLiveLocation(activeRideId);
   const [sosOpen, setSosOpen] = React.useState(false);
   const [routeInfo, setRouteInfo] = React.useState<RouteInfo | null>(null);
 
   React.useEffect(() => {
-    if (!activeRideId) router.replace("/home");
-  }, [activeRideId, router]);
+    if (activeRideId) return;
+    if (!rehydrationFetched) return;
+    if (rehydratedRide) setActiveRideId(rehydratedRide.id);
+    else router.replace("/home");
+  }, [activeRideId, rehydrationFetched, rehydratedRide, router, setActiveRideId]);
 
   React.useEffect(() => {
     if (ride?.status === "completed") {
@@ -86,12 +96,13 @@ export default function LiveRidePage() {
     }
   }, [ride?.status, router]);
 
-  if (!activeRideId) return null;
+  if (!activeRideId) return <RideLoadingSkeleton />;
   if (!ride) return <RideLoadingSkeleton />;
 
   const driver = ride.driver;
+  const isArrived = ride.status === "arrived";
   const showOtp = Boolean(driver) && ride.status !== "in_progress";
-  const followLive = ride.status === "arriving" || ride.status === "in_progress";
+  const followLive = ride.status === "arriving" || ride.status === "arrived" || ride.status === "in_progress";
 
   return (
     <div className="flex flex-1 flex-col">
@@ -103,6 +114,7 @@ export default function LiveRidePage() {
           liveMarker={liveDriverLocation ?? driver?.location}
           showRoute
           followLive={followLive}
+          liveMarkerWaiting={isArrived}
           onRouteInfo={setRouteInfo}
         />
 
@@ -139,11 +151,15 @@ export default function LiveRidePage() {
                   <span className="text-xs text-muted-foreground">{driver.rating.toFixed(1)}</span>
                 </div>
               </div>
-              {typeof driver.etaMinutes === "number" && (
-                <div className="shrink-0 text-right">
-                  <p className="font-mono text-xl font-semibold text-foreground">{driver.etaMinutes}</p>
-                  <p className="text-[11px] text-muted-foreground">min ETA</p>
-                </div>
+              {isArrived ? (
+                <WaitingTimer anchorIso={ride.arrivedAt} label="Waiting for you…" className="shrink-0" />
+              ) : (
+                typeof driver.etaMinutes === "number" && (
+                  <div className="shrink-0 text-right">
+                    <p className="font-mono text-xl font-semibold text-foreground">{driver.etaMinutes}</p>
+                    <p className="text-[11px] text-muted-foreground">min ETA</p>
+                  </div>
+                )
               )}
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-border/70 bg-muted/40 px-4 py-3">

@@ -9,7 +9,7 @@ import { recordRideStatus } from "../lib/rideHistory";
 
 const router = Router();
 
-const ACTIVE_STATUSES = ["requested", "matched", "arriving", "in_progress"] as const;
+const ACTIVE_STATUSES = ["requested", "matched", "arriving", "arrived", "in_progress"] as const;
 
 const rideLocationSchema = z.object({
   address: z.string(),
