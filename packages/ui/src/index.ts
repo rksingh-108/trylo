@@ -22,6 +22,8 @@ export * from "./kinetic/animated-counter";
 export * from "./kinetic/premium-map";
 export * from "./kinetic/place-autocomplete";
 export * from "./kinetic/geocoding";
+export * from "./kinetic/location-search-sheet";
+export * from "./kinetic/map-location-picker";
 export * from "./kinetic/empty-state";
 export * from "./kinetic/page-transition";
 

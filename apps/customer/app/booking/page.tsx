@@ -2,11 +2,22 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Bike, Car, CarTaxiFront, ChevronLeft, Tag } from "lucide-react";
+import { Bike, Car, CarTaxiFront, ChevronLeft, Pencil, Tag } from "lucide-react";
 import { motion } from "framer-motion";
-import { Button, cn, FareBadge, Input, PremiumMap, toast } from "@trylo/ui";
+import {
+  Button,
+  cn,
+  FareBadge,
+  getCurrentLocationWithAddress,
+  Input,
+  LocationSearchSheet,
+  MapLocationPicker,
+  PremiumMap,
+  toast,
+  type PlaceResult,
+} from "@trylo/ui";
 import { useCreateRide, useFareEstimates } from "@trylo/mock-data/hooks";
-import type { VehicleType } from "@trylo/types";
+import type { GeoPoint, VehicleType } from "@trylo/types";
 import { useBookingStore } from "@/lib/store";
 
 const VEHICLE_ICONS: Record<VehicleType, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -17,10 +28,27 @@ const VEHICLE_ICONS: Record<VehicleType, React.ComponentType<{ size?: number; cl
 
 export default function BookingPage() {
   const router = useRouter();
-  const { pickup, drop, vehicleType, promoCode, setVehicleType, setPromoCode, setActiveRideId } = useBookingStore();
+  const {
+    pickup,
+    drop,
+    vehicleType,
+    promoCode,
+    setPickup,
+    setDrop,
+    setVehicleType,
+    setPromoCode,
+    setActiveRideId,
+  } = useBookingStore();
   const [promoInput, setPromoInput] = React.useState(promoCode ?? "");
   const [routeInfo, setRouteInfo] = React.useState<{ distanceKm: number; durationMin: number } | null>(null);
   const prevLoadingRef = React.useRef(false);
+
+  const [editSheetOpen, setEditSheetOpen] = React.useState(false);
+  const [editFocus, setEditFocus] = React.useState<"pickup" | "drop">("pickup");
+  const [editPickupQuery, setEditPickupQuery] = React.useState("");
+  const [editDropQuery, setEditDropQuery] = React.useState("");
+  const [mapPickerOpen, setMapPickerOpen] = React.useState(false);
+  const [locatingPickup, setLocatingPickup] = React.useState(false);
 
   React.useEffect(() => {
     if (!pickup || !drop) router.replace("/home");
@@ -56,6 +84,43 @@ export default function BookingPage() {
   function handleApplyPromo() {
     const code = promoInput.trim().toUpperCase();
     setPromoCode(code || null);
+  }
+
+  function openEditSheet(focus: "pickup" | "drop") {
+    setEditPickupQuery(pickup?.address ?? "");
+    setEditDropQuery(drop?.address ?? "");
+    setEditFocus(focus);
+    setEditSheetOpen(true);
+  }
+
+  function handleEditPickupSelect(place: PlaceResult) {
+    setPickup({ address: place.description, point: { lat: place.lat, lng: place.lng } });
+    setEditSheetOpen(false);
+  }
+
+  function handleEditDropSelect(place: PlaceResult) {
+    setDrop({ address: place.description, point: { lat: place.lat, lng: place.lng } });
+    setEditSheetOpen(false);
+  }
+
+  async function handleUseCurrentLocation() {
+    setLocatingPickup(true);
+    const real = await getCurrentLocationWithAddress();
+    setLocatingPickup(false);
+    if (real) {
+      setPickup(real);
+      setEditPickupQuery(real.address);
+    }
+  }
+
+  function handleChooseOnMap() {
+    setEditSheetOpen(false);
+    setMapPickerOpen(true);
+  }
+
+  function handleMapPickerConfirm(result: { address: string; point: GeoPoint }) {
+    setPickup(result);
+    setMapPickerOpen(false);
   }
 
   async function handleBook() {
@@ -115,14 +180,20 @@ export default function BookingPage() {
             <span className="h-2.5 w-2.5 rounded-full bg-teal-600" />
           </div>
           <div className="flex-1 space-y-3">
-            <div>
-              <p className="text-xs text-muted-foreground">Pickup</p>
-              <p className="text-sm font-medium text-foreground">{pickup.address}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Drop</p>
-              <p className="text-sm font-medium text-foreground">{drop.address}</p>
-            </div>
+            <button type="button" onClick={() => openEditSheet("pickup")} className="flex w-full items-center justify-between gap-2 text-left">
+              <span className="min-w-0">
+                <p className="text-xs text-muted-foreground">Pickup</p>
+                <p className="truncate text-sm font-medium text-foreground">{pickup.address}</p>
+              </span>
+              <Pencil size={13} className="shrink-0 text-muted-foreground" />
+            </button>
+            <button type="button" onClick={() => openEditSheet("drop")} className="flex w-full items-center justify-between gap-2 text-left">
+              <span className="min-w-0">
+                <p className="text-xs text-muted-foreground">Drop</p>
+                <p className="truncate text-sm font-medium text-foreground">{drop.address}</p>
+              </span>
+              <Pencil size={13} className="shrink-0 text-muted-foreground" />
+            </button>
           </div>
         </div>
       </div>
@@ -205,6 +276,31 @@ export default function BookingPage() {
           {createRide.isPending ? "Booking..." : selected ? `Book ${selected.label} · ₹${selected.fare.total}` : "Select a ride"}
         </Button>
       </div>
+
+      <LocationSearchSheet
+        open={editSheetOpen}
+        onOpenChange={setEditSheetOpen}
+        title="Edit your ride"
+        pickupValue={editPickupQuery}
+        onPickupQueryChange={setEditPickupQuery}
+        onPickupSelect={handleEditPickupSelect}
+        dropValue={editDropQuery}
+        onDropQueryChange={setEditDropQuery}
+        onDropSelect={handleEditDropSelect}
+        autoFocus={editFocus}
+        onUseCurrentLocation={handleUseCurrentLocation}
+        onChooseOnMap={handleChooseOnMap}
+        usingCurrentLocation={locatingPickup}
+      />
+
+      {mapPickerOpen && (
+        <MapLocationPicker
+          initialPoint={pickup.point}
+          title="Move the map to set your pickup point"
+          onConfirm={handleMapPickerConfirm}
+          onClose={() => setMapPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

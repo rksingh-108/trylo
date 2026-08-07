@@ -20,7 +20,10 @@ export const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DrawerPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-[hsl(var(--scrim)/0.45)] backdrop-blur-[2px]", className)}
+    className={cn(
+      "fixed inset-0 z-50 bg-[hsl(var(--scrim)/0.45)] backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:!pointer-events-none",
+      className
+    )}
     {...props}
   />
 ));
@@ -35,7 +38,7 @@ export const SheetContent = React.forwardRef<
     <DrawerPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed inset-x-0 bottom-0 z-50 mx-auto flex max-h-[92vh] w-full max-w-md flex-col rounded-t-[1.75rem] border-t border-border bg-card shadow-elevation-4 pb-[env(safe-area-inset-bottom)]",
+        "fixed inset-x-0 bottom-0 z-50 mx-auto flex max-h-[92vh] w-full max-w-md flex-col rounded-t-[1.75rem] border-t border-border bg-card shadow-elevation-4 pb-[env(safe-area-inset-bottom)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom data-[state=closed]:!pointer-events-none",
         className
       )}
       {...props}

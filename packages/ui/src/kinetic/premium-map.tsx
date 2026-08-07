@@ -37,6 +37,8 @@ export interface PremiumMapProps {
    */
   followLive?: boolean;
   onRouteInfo?: (info: RouteInfo) => void;
+  /** Fires whenever the camera settles on a new center — panning, `flyTo`, or the current-location button. Used by the map location picker. */
+  onCenterChange?: (point: MapGeoPoint) => void;
   /** Unused with MapLibre (kept for backward-compat call sites); no-op. */
   mapId?: string;
   children?: React.ReactNode;
@@ -347,6 +349,7 @@ export function PremiumMap({
   showCurrentLocationButton = true,
   followLive = false,
   onRouteInfo,
+  onCenterChange,
   children,
 }: PremiumMapProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -528,6 +531,20 @@ export function PremiumMap({
     map.easeTo({ center: toLngLat(liveMarker), duration: FOLLOW_EASE_MS, easing: (t) => t });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, ready, followLive, liveMarker?.lat, liveMarker?.lng]);
+
+  // Reports the settled camera center after any pan/drag/flyTo — used by the
+  // full-screen map location picker to track its fixed center pin.
+  React.useEffect(() => {
+    if (!map || !onCenterChange) return;
+    function handleMoveEnd() {
+      const c = map!.getCenter();
+      onCenterChange!({ lat: c.lat, lng: c.lng });
+    }
+    map.on("moveend", handleMoveEnd);
+    return () => {
+      map.off("moveend", handleMoveEnd);
+    };
+  }, [map, onCenterChange]);
 
   if (loadError) {
     return <MapKeyMissing className={className} />;

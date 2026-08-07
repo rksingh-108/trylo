@@ -2,19 +2,17 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Home as HomeIcon, MapPin, Search, User, Wallet } from "lucide-react";
+import { Briefcase, Home as HomeIcon, MapPin, Pencil, Search, User, Wallet } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   getCurrentLocationWithAddress,
+  LocationSearchSheet,
+  MapLocationPicker,
   PageTransition,
-  PlaceAutocomplete,
   PremiumMap,
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
   Skeleton,
+  type PlaceResult,
 } from "@trylo/ui";
 import { useCurrentUser, useSavedPlaces } from "@trylo/mock-data/hooks";
 import { CITY_CENTER } from "@trylo/mock-data";
@@ -36,9 +34,13 @@ const PLACE_ICONS: Record<string, React.ComponentType<{ size?: number; className
 export default function HomePage() {
   const router = useRouter();
   const { data: user } = useCurrentUser();
-  const { pickup, setPickup, setDrop } = useBookingStore();
-  const [query, setQuery] = React.useState("");
+  const { pickup, drop, setPickup, setDrop } = useBookingStore();
+  const [pickupQuery, setPickupQuery] = React.useState("");
+  const [dropQuery, setDropQuery] = React.useState("");
   const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [sheetFocus, setSheetFocus] = React.useState<"pickup" | "drop">("drop");
+  const [mapPickerOpen, setMapPickerOpen] = React.useState(false);
+  const [locatingPickup, setLocatingPickup] = React.useState(false);
 
   const { data: savedPlaces, isLoading: savedPlacesLoading } = useSavedPlaces();
 
@@ -58,14 +60,49 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  React.useEffect(() => {
-    if (!sheetOpen) setQuery("");
-  }, [sheetOpen]);
+  function openSheet(focus: "pickup" | "drop") {
+    setPickupQuery(pickup?.address ?? "");
+    setDropQuery(drop?.address ?? "");
+    setSheetFocus(focus);
+    setSheetOpen(true);
+  }
 
-  function handleSelect(address: string, point: GeoPoint) {
+  function handleDropSelect(place: PlaceResult) {
+    setDrop({ address: place.description, point: { lat: place.lat, lng: place.lng } });
+    setSheetOpen(false);
+    router.push("/booking");
+  }
+
+  function handleSavedPlaceSelect(address: string, point: GeoPoint) {
     setDrop({ address, point });
     setSheetOpen(false);
     router.push("/booking");
+  }
+
+  function handlePickupSelect(place: PlaceResult) {
+    setPickup({ address: place.description, point: { lat: place.lat, lng: place.lng } });
+    setPickupQuery(place.description);
+  }
+
+  async function handleUseCurrentLocation() {
+    setLocatingPickup(true);
+    const real = await getCurrentLocationWithAddress();
+    setLocatingPickup(false);
+    if (real) {
+      setPickup(real);
+      setPickupQuery(real.address);
+    }
+  }
+
+  function handleChooseOnMap() {
+    setSheetOpen(false);
+    setMapPickerOpen(true);
+  }
+
+  function handleMapPickerConfirm(result: { address: string; point: GeoPoint }) {
+    setPickup(result);
+    setPickupQuery(result.address);
+    setMapPickerOpen(false);
   }
 
   const mapCenter = pickup?.point ?? CITY_CENTER;
@@ -98,20 +135,42 @@ export default function HomePage() {
       </div>
 
       <div className="relative z-10 mt-auto flex flex-col gap-3 px-5 pb-5">
-        <motion.button
-          type="button"
-          onClick={() => setSheetOpen(true)}
-          whileTap={{ scale: 0.98 }}
-          className="glass-strong flex items-center gap-3 rounded-2xl px-4 py-4 text-left shadow-elevation-3"
-        >
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/15">
-            <Search size={17} className="text-primary" />
-          </span>
-          <span className="flex-1">
-            <p className="text-xs text-muted-foreground">Where to?</p>
-            <p className="text-sm font-medium text-foreground">Search destination</p>
-          </span>
-        </motion.button>
+        <div className="glass-strong flex flex-col divide-y divide-border/60 overflow-hidden rounded-2xl shadow-elevation-3">
+          <motion.button
+            type="button"
+            onClick={() => openSheet("pickup")}
+            whileTap={{ scale: 0.98 }}
+            className="flex items-center gap-3 px-4 py-3.5 text-left"
+          >
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-amber-500/15">
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <p className="text-[11px] text-muted-foreground">Pickup</p>
+              <p className="truncate text-sm font-medium text-foreground">
+                {pickup?.address ?? "Set pickup location"}
+              </p>
+            </span>
+            <Pencil size={13} className="shrink-0 text-muted-foreground" />
+          </motion.button>
+
+          <motion.button
+            type="button"
+            onClick={() => openSheet("drop")}
+            whileTap={{ scale: 0.98 }}
+            className="flex items-center gap-3 px-4 py-3.5 text-left"
+          >
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/15">
+              <Search size={16} className="text-primary" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <p className="text-[11px] text-muted-foreground">Where to?</p>
+              <p className="truncate text-sm font-medium text-foreground">
+                {drop?.address ?? "Search destination"}
+              </p>
+            </span>
+          </motion.button>
+        </div>
 
         {savedPlaces && savedPlaces.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1">
@@ -122,7 +181,7 @@ export default function HomePage() {
                   key={place.id}
                   type="button"
                   whileTap={{ scale: 0.96 }}
-                  onClick={() => handleSelect(place.address, place.point)}
+                  onClick={() => handleSavedPlaceSelect(place.address, place.point)}
                   className="glass flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 shadow-elevation-1"
                 >
                   <Icon size={14} className="text-foreground" />
@@ -134,58 +193,66 @@ export default function HomePage() {
         )}
       </div>
 
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>Where to?</SheetTitle>
-          </SheetHeader>
+      <LocationSearchSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        pickupValue={pickupQuery}
+        onPickupQueryChange={setPickupQuery}
+        onPickupSelect={handlePickupSelect}
+        dropValue={dropQuery}
+        onDropQueryChange={setDropQuery}
+        onDropSelect={handleDropSelect}
+        autoFocus={sheetFocus}
+        onUseCurrentLocation={handleUseCurrentLocation}
+        onChooseOnMap={handleChooseOnMap}
+        usingCurrentLocation={locatingPickup}
+      >
+        <div className="mt-5">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Saved places</p>
 
-          <PlaceAutocomplete
-            value={query}
-            onChange={setQuery}
-            onSelect={(place) => handleSelect(place.description, { lat: place.lat, lng: place.lng })}
-            placeholder="Search destination"
-            autoFocus
-          />
-
-          <div className="mt-5">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Saved places</p>
-
-            {savedPlacesLoading && (
-              <div className="space-y-2">
-                <Skeleton className="h-14 rounded-xl" />
-                <Skeleton className="h-14 rounded-xl" />
-              </div>
-            )}
-
-            <div className="divide-y divide-border">
-              {savedPlaces?.map((place) => {
-                const Icon = PLACE_ICONS[place.label] ?? MapPin;
-                return (
-                  <button
-                    key={place.id}
-                    type="button"
-                    onClick={() => handleSelect(place.address, place.point)}
-                    className="-mx-1 flex w-full items-center gap-3 rounded-lg px-1 py-3 text-left transition-colors hover:bg-accent/60"
-                  >
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
-                      <Icon size={17} className="text-foreground" />
-                    </span>
-                    <span className="min-w-0">
-                      <p className="truncate text-sm font-medium text-foreground">{place.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">{place.address}</p>
-                    </span>
-                  </button>
-                );
-              })}
-
-              {!savedPlacesLoading && savedPlaces?.length === 0 && (
-                <p className="py-3 text-sm text-muted-foreground">No saved places yet</p>
-              )}
+          {savedPlacesLoading && (
+            <div className="space-y-2">
+              <Skeleton className="h-14 rounded-xl" />
+              <Skeleton className="h-14 rounded-xl" />
             </div>
+          )}
+
+          <div className="divide-y divide-border">
+            {savedPlaces?.map((place) => {
+              const Icon = PLACE_ICONS[place.label] ?? MapPin;
+              return (
+                <button
+                  key={place.id}
+                  type="button"
+                  onClick={() => handleSavedPlaceSelect(place.address, place.point)}
+                  className="-mx-1 flex w-full items-center gap-3 rounded-lg px-1 py-3 text-left transition-colors hover:bg-accent/60"
+                >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
+                    <Icon size={17} className="text-foreground" />
+                  </span>
+                  <span className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{place.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{place.address}</p>
+                  </span>
+                </button>
+              );
+            })}
+
+            {!savedPlacesLoading && savedPlaces?.length === 0 && (
+              <p className="py-3 text-sm text-muted-foreground">No saved places yet</p>
+            )}
           </div>
-        </SheetContent>
-      </Sheet>
+        </div>
+      </LocationSearchSheet>
+
+      {mapPickerOpen && (
+        <MapLocationPicker
+          initialPoint={pickup?.point ?? mapCenter}
+          title="Move the map to set your pickup point"
+          onConfirm={handleMapPickerConfirm}
+          onClose={() => setMapPickerOpen(false)}
+        />
+      )}
     </PageTransition>
   );
 }
