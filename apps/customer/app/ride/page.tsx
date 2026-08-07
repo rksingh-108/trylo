@@ -9,15 +9,15 @@ import {
   AvatarFallback,
   AvatarImage,
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
   FareBadge,
   PageTransition,
   PremiumMap,
   RatingStars,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  Skeleton,
   StatusPill,
   type RouteInfo,
 } from "@trylo/ui";
@@ -31,6 +31,41 @@ function initials(name: string) {
     .slice(0, 2)
     .join("")
     .toUpperCase();
+}
+
+const panelContainer = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.07, delayChildren: 0.05 } },
+};
+
+const panelItem = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, damping: 22, stiffness: 220 } },
+};
+
+function RideLoadingSkeleton() {
+  return (
+    <div className="flex flex-1 flex-col">
+      <Skeleton className="h-72 w-full rounded-none" />
+      <div className="flex-1 px-5 pb-8 pt-4">
+        <div className="flex justify-end">
+          <Skeleton className="h-7 w-20 rounded-full" />
+        </div>
+        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-elevation-2">
+          <Skeleton className="h-14 w-14 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-2/3 rounded" />
+            <Skeleton className="h-3 w-1/3 rounded" />
+          </div>
+          <Skeleton className="h-8 w-8 shrink-0 rounded" />
+        </div>
+        <div className="mt-4 space-y-3 rounded-xl border border-border bg-card p-4">
+          <Skeleton className="h-3 w-4/5 rounded" />
+          <Skeleton className="h-3 w-3/5 rounded" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function LiveRidePage() {
@@ -51,10 +86,12 @@ export default function LiveRidePage() {
     }
   }, [ride?.status, router]);
 
-  if (!activeRideId || !ride) return null;
+  if (!activeRideId) return null;
+  if (!ride) return <RideLoadingSkeleton />;
 
   const driver = ride.driver;
   const showOtp = Boolean(driver) && ride.status !== "in_progress";
+  const followLive = ride.status === "arriving" || ride.status === "in_progress";
 
   return (
     <div className="flex flex-1 flex-col">
@@ -65,6 +102,7 @@ export default function LiveRidePage() {
           drop={ride.drop.point}
           liveMarker={liveDriverLocation ?? driver?.location}
           showRoute
+          followLive={followLive}
           onRouteInfo={setRouteInfo}
         />
 
@@ -79,15 +117,14 @@ export default function LiveRidePage() {
       </div>
 
       <PageTransition className="flex-1 px-5 pb-8 pt-4">
-        <div className="flex items-center justify-end">
+        <motion.div variants={panelContainer} initial="hidden" animate="show">
+        <motion.div variants={panelItem} className="flex items-center justify-end">
           <FareBadge amount={ride.fare.total} />
-        </div>
+        </motion.div>
 
         {driver && (
           <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: "spring", damping: 22, stiffness: 220 }}
+            variants={panelItem}
             className="mt-4 overflow-hidden rounded-2xl border border-border bg-card shadow-elevation-2"
           >
             <div className="flex items-center gap-3 p-4">
@@ -137,9 +174,7 @@ export default function LiveRidePage() {
 
         {showOtp && (
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
+            variants={panelItem}
             className="mt-4 rounded-2xl border border-primary/25 bg-primary/5 p-4 text-center"
           >
             <p className="text-xs font-semibold uppercase tracking-wide text-primary/80">
@@ -158,7 +193,7 @@ export default function LiveRidePage() {
           </motion.div>
         )}
 
-        <div className="mt-4 rounded-xl border border-border bg-card p-4">
+        <motion.div variants={panelItem} className="mt-4 rounded-xl border border-border bg-card p-4">
           <div className="flex gap-3">
             <div className="flex flex-col items-center pt-1">
               <span className="grid h-5 w-5 place-items-center rounded-full bg-amber-500/15">
@@ -185,25 +220,28 @@ export default function LiveRidePage() {
               </span>
             )}
           </div>
-        </div>
+        </motion.div>
 
-        <Button variant="destructive" size="lg" className="mt-4 w-full" onClick={() => setSosOpen(true)}>
-          <AlertTriangle size={18} />
-          SOS
-        </Button>
+        <motion.div variants={panelItem}>
+          <Button variant="destructive" size="lg" className="mt-4 w-full" onClick={() => setSosOpen(true)}>
+            <AlertTriangle size={18} />
+            SOS
+          </Button>
+        </motion.div>
+        </motion.div>
       </PageTransition>
 
-      <Dialog open={sosOpen} onOpenChange={setSosOpen}>
-        <DialogContent>
-          <DialogHeader className="items-center text-center">
-            <span className="mb-2 grid h-12 w-12 place-items-center rounded-full bg-destructive/15">
+      <Sheet open={sosOpen} onOpenChange={setSosOpen}>
+        <SheetContent>
+          <SheetHeader className="items-center text-center">
+            <span className="mx-auto mb-2 grid h-12 w-12 place-items-center rounded-full bg-destructive/15">
               <AlertTriangle size={22} className="text-destructive" />
             </span>
-            <DialogTitle>Emergency assistance</DialogTitle>
-            <DialogDescription>
-              We'll share your live location and trip details with your emergency contacts and local authorities.
-            </DialogDescription>
-          </DialogHeader>
+            <SheetTitle>Emergency assistance</SheetTitle>
+            <p className="text-sm text-muted-foreground">
+              We&apos;ll share your live location and trip details with your emergency contacts and local authorities.
+            </p>
+          </SheetHeader>
           <div className="flex flex-col gap-2">
             <Button variant="destructive" size="lg" onClick={() => setSosOpen(false)}>
               Alert emergency contacts
@@ -212,8 +250,8 @@ export default function LiveRidePage() {
               Cancel
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

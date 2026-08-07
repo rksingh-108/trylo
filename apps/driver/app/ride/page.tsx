@@ -14,6 +14,7 @@ import {
   OtpInput,
   PremiumMap,
   RatingStars,
+  Skeleton,
   StatusPill,
 } from "@trylo/ui";
 import type { RouteInfo } from "@trylo/ui";
@@ -27,6 +28,31 @@ function initials(name: string) {
     .slice(0, 2)
     .join("")
     .toUpperCase();
+}
+
+function RideLoadingSkeleton() {
+  return (
+    <div className="flex flex-1 flex-col">
+      <Skeleton className="h-60 w-full rounded-none" />
+      <div className="-mt-6 flex flex-1 flex-col rounded-t-[1.75rem] bg-background px-5 pb-8 pt-6 shadow-elevation-3">
+        <Card variant="elevated">
+          <CardContent className="flex items-center gap-3 p-4">
+            <Skeleton className="h-12 w-12 shrink-0 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-1/2 rounded" />
+              <Skeleton className="h-3 w-1/3 rounded" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card variant="default" className="mt-4">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-3 w-4/5 rounded" />
+            <Skeleton className="h-3 w-3/5 rounded" />
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
 }
 
 export default function ActiveRidePage() {
@@ -67,7 +93,7 @@ export default function ActiveRidePage() {
     return <CompletedSummary ride={completedRide} onDone={() => router.push("/dashboard")} />;
   }
 
-  if (!ride) return null;
+  if (!ride) return <RideLoadingSkeleton />;
 
   const isArriving = ride.status === "arriving";
   const isInProgress = ride.status === "in_progress";
@@ -81,6 +107,7 @@ export default function ActiveRidePage() {
           drop={ride.drop.point}
           liveMarker={liveGpsLocation ?? ride.driver?.location}
           showRoute
+          followLive={isArriving || isInProgress}
           onRouteInfo={setRouteInfo}
         />
         <div className="absolute left-4 top-4">
