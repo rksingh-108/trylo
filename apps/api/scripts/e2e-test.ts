@@ -84,6 +84,226 @@ async function waitFor<T>(
 
 /** Set once the driver token is known, so the outer wrapper can always take the driver offline again. */
 let capturedDriverToken: string | null = null;
+let capturedCancelDriverToken: string | null = null;
+
+async function onboardVerifiedOnlineDriver(phone: string, name: string): Promise<{ token: string; driverId: string }> {
+  const otpReq = await api<{ devHintOtp: string }>("/api/driver/auth/otp/request", {
+    method: "POST",
+    body: { phone },
+  });
+  const verify = await api<{ token: string }>("/api/driver/auth/otp/verify", {
+    method: "POST",
+    body: { phone, otp: otpReq.data.devHintOtp },
+  });
+  const token = verify.data.token;
+
+  const kycList = await api<Array<{ id: string; type: string }>>("/api/driver/auth/kyc", { token });
+  for (const doc of kycList.data) {
+    await api(`/api/driver/auth/kyc/${doc.id}/upload`, {
+      method: "POST",
+      token,
+      body: { fileName: `${doc.type}.jpg` },
+    });
+  }
+  await api("/api/driver/auth/vehicle", {
+    method: "POST",
+    token,
+    body: { name, vehicleType: "bike", make: "Honda", model: "Activa", registrationNumber: "KA05EE9999", color: "Black" },
+  });
+  await waitFor(
+    async () => {
+      const status = await api<string>("/api/driver/auth/verification-status", { token });
+      return status.data === "verified";
+    },
+    "cancellation-test driver verification status = verified",
+    15000
+  );
+  await api("/api/driver/status", { method: "POST", token, body: { isOnline: true } });
+  const me = await api<{ id: string }>("/api/driver/auth/me", { token });
+  return { token, driverId: me.data.id };
+}
+
+async function createRide(customerToken: string, pickup: { address: string; point: { lat: number; lng: number } }, drop: { address: string; point: { lat: number; lng: number } }) {
+  const fares = await api<Array<{ vehicleType: string; fare: Record<string, number> }>>(
+    "/api/customer/fares/estimates",
+    {
+      token: customerToken,
+      query: { pickupLat: pickup.point.lat, pickupLng: pickup.point.lng, dropLat: drop.point.lat, dropLng: drop.point.lng },
+    }
+  );
+  const bikeFare = fares.data.find((f) => f.vehicleType === "bike")!;
+  const rideRes = await api<{ id: string; status: string }>("/api/customer/rides", {
+    method: "POST",
+    token: customerToken,
+    body: { pickup, drop, vehicleType: "bike", fare: bikeFare.fare },
+  });
+  return rideRes.data.id;
+}
+
+/**
+ * Exercises the ride-cancellation feature end-to-end: customer cancel while unmatched,
+ * customer cancel while arriving (with the driver seeing the realtime update), driver
+ * cancel while arriving (with the customer seeing the realtime update), and the status
+ * guards that block cancellation once a ride has reached 'arrived'/'in_progress'.
+ * Uses its own customer + driver so it doesn't disturb the main happy-path run() above.
+ */
+async function runCancellationScenarios() {
+  console.log("\n=== Cancellation scenarios ===");
+  const suffix = Date.now().toString().slice(-8);
+  const customerPhone = `9${suffix}3`;
+  const driverPhone = `9${suffix}4`;
+
+  const custOtpReq = await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", {
+    method: "POST",
+    body: { phone: customerPhone },
+  });
+  const custVerify = await api<{ token: string }>("/api/customer/auth/otp/verify", {
+    method: "POST",
+    body: { phone: customerPhone, otp: custOtpReq.data.devHintOtp },
+  });
+  const customerToken = custVerify.data.token;
+  await api("/api/customer/auth/profile", {
+    method: "POST",
+    token: customerToken,
+    body: { name: "Cancellation Rider" },
+  });
+
+  const { token: driverToken, driverId } = await onboardVerifiedOnlineDriver(driverPhone, "Cancellation Driver");
+  capturedCancelDriverToken = driverToken;
+
+  const driverSocket = io(API, { transports: ["websocket"], auth: { token: driverToken } });
+  await new Promise<void>((resolve) => driverSocket.on("connect", () => resolve()));
+  driverSocket.emit("join:driver", driverId);
+  let lastDriverRideUpdate: { status: string } | null = null;
+  driverSocket.on("ride:updated", (ride: { status: string }) => {
+    lastDriverRideUpdate = ride;
+  });
+
+  const pickup = { address: "Cancel Test Pickup", point: { lat: 12.9716, lng: 77.5946 } };
+  const drop = { address: "Cancel Test Drop", point: { lat: 12.99, lng: 77.61 } };
+
+  // ---- Scenario 1: customer cancels an unmatched ('requested') ride ----
+  const ride1 = await createRide(customerToken, pickup, drop);
+  const cancel1 = await api<{ status: string; cancelledBy: string }>(`/api/customer/rides/${ride1}/cancel`, {
+    method: "POST",
+    token: customerToken,
+    body: { reason: "Changed my mind" },
+  });
+  assert(
+    cancel1.status === 200 && cancel1.data.status === "cancelled" && cancel1.data.cancelledBy === "customer",
+    "customer can cancel an unmatched ride, cancelledBy = customer"
+  );
+
+  // ---- Scenario 2: customer cancels while the driver is 'arriving'; driver sees it over the socket ----
+  const ride2 = await createRide(customerToken, pickup, drop);
+  const accepted2 = await waitFor(
+    async () => {
+      const acc = await api<{ status: string }>(`/api/driver/requests/${ride2}/accept`, { method: "POST", token: driverToken });
+      return acc.status === 200 && acc.data ? acc : null;
+    },
+    "driver accepts ride2",
+    10000
+  );
+  assert(accepted2.data.status === "arriving", "ride2 accepted, status -> arriving");
+  driverSocket.emit("join:ride", ride2);
+  await sleep(200);
+
+  lastDriverRideUpdate = null;
+  const cancel2 = await api<{ status: string; cancelledBy: string }>(`/api/customer/rides/${ride2}/cancel`, {
+    method: "POST",
+    token: customerToken,
+    body: { reason: "Found another ride" },
+  });
+  assert(
+    cancel2.status === 200 && cancel2.data.cancelledBy === "customer",
+    "customer can cancel while ride is 'arriving', cancelledBy = customer"
+  );
+  await waitFor(
+    async () => lastDriverRideUpdate?.status === "cancelled",
+    "driver receives realtime cancellation update after customer cancels",
+    5000
+  );
+  log("driver socket received cancelled update (customer-initiated)", true);
+
+  // ---- Scenario 3: driver cancels while 'arriving'; customer sees it over the socket ----
+  const ride3 = await createRide(customerToken, pickup, drop);
+  await waitFor(
+    async () => {
+      const acc = await api<{ status: string }>(`/api/driver/requests/${ride3}/accept`, { method: "POST", token: driverToken });
+      return acc.status === 200 && acc.data ? acc : null;
+    },
+    "driver accepts ride3",
+    10000
+  );
+
+  const customerSocket3 = io(API, { transports: ["websocket"], auth: { token: customerToken } });
+  await new Promise<void>((resolve) => customerSocket3.on("connect", () => resolve()));
+  customerSocket3.emit("join:ride", ride3);
+  let lastCustomerRideUpdate: { status: string; cancelledBy?: string } | null = null;
+  customerSocket3.on("ride:updated", (ride: { status: string; cancelledBy?: string }) => {
+    lastCustomerRideUpdate = ride;
+  });
+
+  const driverCancel3 = await api<{ status: string; cancelledBy: string }>(`/api/driver/rides/${ride3}/cancel`, {
+    method: "POST",
+    token: driverToken,
+    body: { reason: "Vehicle issue" },
+  });
+  assert(
+    driverCancel3.status === 200 && driverCancel3.data.cancelledBy === "driver",
+    "driver can cancel while ride is 'arriving', cancelledBy = driver"
+  );
+  await waitFor(
+    async () => lastCustomerRideUpdate?.status === "cancelled" && lastCustomerRideUpdate?.cancelledBy === "driver",
+    "customer receives realtime cancellation update after driver cancels",
+    5000
+  );
+  log("customer socket received cancelled update (driver-initiated)", true);
+  customerSocket3.close();
+
+  // ---- Scenario 4: status guards — customer cannot cancel once 'arrived'; driver still can ----
+  const ride4 = await createRide(customerToken, pickup, drop);
+  await waitFor(
+    async () => {
+      const acc = await api<{ status: string }>(`/api/driver/requests/${ride4}/accept`, { method: "POST", token: driverToken });
+      return acc.status === 200 && acc.data ? acc : null;
+    },
+    "driver accepts ride4",
+    10000
+  );
+  await api("/api/driver/location", { method: "POST", token: driverToken, body: { lat: pickup.point.lat, lng: pickup.point.lng } });
+  await waitFor(
+    async () => {
+      const status = await api<{ status: string }>(`/api/customer/rides/${ride4}/status`, { token: customerToken });
+      return status.data.status === "arrived" ? status : null;
+    },
+    "ride4 auto-transitions to 'arrived'",
+    5000
+  );
+
+  const blockedCancel = await api(`/api/customer/rides/${ride4}/cancel`, {
+    method: "POST",
+    token: customerToken,
+    body: { reason: "Changed my mind" },
+  });
+  assert(blockedCancel.status === 409, "customer cancel is rejected (409) once the ride has reached 'arrived'");
+
+  const driverCancel4 = await api<{ status: string }>(`/api/driver/rides/${ride4}/cancel`, {
+    method: "POST",
+    token: driverToken,
+    body: { reason: "Rider is not reachable" },
+  });
+  assert(driverCancel4.status === 200 && driverCancel4.data.status === "cancelled", "driver can still cancel while 'arrived'");
+
+  const repeatCancel = await api(`/api/driver/rides/${ride4}/cancel`, {
+    method: "POST",
+    token: driverToken,
+    body: { reason: "test" },
+  });
+  assert(repeatCancel.status === 409, "cancelling an already-cancelled ride is rejected (409)");
+
+  driverSocket.close();
+}
 
 async function run() {
   const suffix = Date.now().toString().slice(-8);
@@ -385,6 +605,12 @@ async function run() {
 
   driverSocket.close();
   customerSocket.close();
+
+  // Take this driver offline so it doesn't compete with the cancellation-scenario driver
+  // for ride offers below (both are online, verified, and offer the same vehicle type).
+  await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
+
+  await runCancellationScenarios();
 }
 
 run()
@@ -399,6 +625,13 @@ run()
       await api("/api/driver/status", {
         method: "POST",
         token: capturedDriverToken,
+        body: { isOnline: false },
+      }).catch(() => {});
+    }
+    if (capturedCancelDriverToken) {
+      await api("/api/driver/status", {
+        method: "POST",
+        token: capturedCancelDriverToken,
         body: { isOnline: false },
       }).catch(() => {});
     }

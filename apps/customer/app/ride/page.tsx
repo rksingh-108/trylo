@@ -9,6 +9,8 @@ import {
   AvatarFallback,
   AvatarImage,
   Button,
+  CancelRideSheet,
+  CUSTOMER_CANCEL_REASONS,
   FareBadge,
   PageTransition,
   PremiumMap,
@@ -19,10 +21,11 @@ import {
   SheetTitle,
   Skeleton,
   StatusPill,
+  toast,
   WaitingTimer,
   type RouteInfo,
 } from "@trylo/ui";
-import { useActiveRide, useDriverLiveLocation, useRideStatus } from "@trylo/mock-data/hooks";
+import { useActiveRide, useCancelRide, useDriverLiveLocation, useRideStatus } from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
 
 function initials(name: string) {
@@ -71,7 +74,7 @@ function RideLoadingSkeleton() {
 
 export default function LiveRidePage() {
   const router = useRouter();
-  const { activeRideId, setActiveRideId } = useBookingStore();
+  const { activeRideId, setActiveRideId, reset } = useBookingStore();
   // A hard refresh wipes the in-memory booking store, so `activeRideId` may be
   // unknown even though the rider genuinely has a ride in flight server-side.
   // Rehydrate it from the server before giving up and bouncing to /home — this
@@ -80,8 +83,11 @@ export default function LiveRidePage() {
   const { data: rehydratedRide, isFetched: rehydrationFetched } = useActiveRide(!activeRideId);
   const { data: ride } = useRideStatus(activeRideId);
   const liveDriverLocation = useDriverLiveLocation(activeRideId);
+  const cancelRide = useCancelRide();
   const [sosOpen, setSosOpen] = React.useState(false);
+  const [cancelSheetOpen, setCancelSheetOpen] = React.useState(false);
   const [routeInfo, setRouteInfo] = React.useState<RouteInfo | null>(null);
+  const cancelHandledRef = React.useRef(false);
 
   React.useEffect(() => {
     if (activeRideId) return;
@@ -96,6 +102,22 @@ export default function LiveRidePage() {
     }
   }, [ride?.status, router]);
 
+  // Handles a cancellation from either side — driven purely by the ride's own
+  // status, so it fires identically whether the rider just cancelled it
+  // themselves (the mutation seeds this same cache) or the driver cancelled
+  // it while this screen was open (pushed in live via the ride:updated socket).
+  React.useEffect(() => {
+    if (ride?.status !== "cancelled" || cancelHandledRef.current) return;
+    cancelHandledRef.current = true;
+    if (ride.cancelledBy === "driver") {
+      toast.error("Driver cancelled the ride", { description: ride.cancelReason });
+    } else {
+      toast.success("Ride cancelled");
+    }
+    reset();
+    router.replace("/home");
+  }, [ride?.status, ride?.cancelledBy, ride?.cancelReason, reset, router]);
+
   if (!activeRideId) return <RideLoadingSkeleton />;
   if (!ride) return <RideLoadingSkeleton />;
 
@@ -103,6 +125,13 @@ export default function LiveRidePage() {
   const isArrived = ride.status === "arrived";
   const showOtp = Boolean(driver) && ride.status !== "in_progress";
   const followLive = ride.status === "arriving" || ride.status === "arrived" || ride.status === "in_progress";
+  const canCancel = ride.status === "requested" || ride.status === "matched" || ride.status === "arriving";
+
+  async function handleCancelConfirm(reason: string) {
+    if (!activeRideId) return;
+    await cancelRide.mutateAsync({ rideId: activeRideId, reason });
+    setCancelSheetOpen(false);
+  }
 
   return (
     <div className="flex flex-1 flex-col">
@@ -238,6 +267,19 @@ export default function LiveRidePage() {
           </div>
         </motion.div>
 
+        {canCancel && (
+          <motion.div variants={panelItem}>
+            <Button
+              variant="outline"
+              size="lg"
+              className="mt-4 w-full text-destructive"
+              onClick={() => setCancelSheetOpen(true)}
+            >
+              Cancel ride
+            </Button>
+          </motion.div>
+        )}
+
         <motion.div variants={panelItem}>
           <Button variant="destructive" size="lg" className="mt-4 w-full" onClick={() => setSosOpen(true)}>
             <AlertTriangle size={18} />
@@ -268,6 +310,14 @@ export default function LiveRidePage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <CancelRideSheet
+        open={cancelSheetOpen}
+        onOpenChange={setCancelSheetOpen}
+        reasons={CUSTOMER_CANCEL_REASONS}
+        onConfirm={handleCancelConfirm}
+        isPending={cancelRide.isPending}
+      />
     </div>
   );
 }

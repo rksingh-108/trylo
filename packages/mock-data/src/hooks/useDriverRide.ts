@@ -119,6 +119,17 @@ export function useEndRide() {
   });
 }
 
+export function useCancelDriverRide() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rideId, reason }: { rideId: string; reason: string }) =>
+      driverRideService.cancelDriverRide(rideId, reason),
+    onSuccess: () => {
+      queryClient.setQueryData(queryKeys.activeDriverRide, null);
+    },
+  });
+}
+
 export function useDriverRideHistory() {
   return useQuery({
     queryKey: queryKeys.driverRideHistory,

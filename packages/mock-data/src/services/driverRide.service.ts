@@ -30,6 +30,10 @@ export async function endRide(rideId: string): Promise<Ride | null> {
   return apiClient.post<Ride | null>(`/api/driver/rides/${rideId}/end`);
 }
 
+export async function cancelDriverRide(rideId: string, reason: string): Promise<Ride | null> {
+  return apiClient.post<Ride | null>(`/api/driver/rides/${rideId}/cancel`, { reason });
+}
+
 export async function getDriverRideHistory(): Promise<Ride[]> {
   return apiClient.get<Ride[]>("/api/driver/rides/history");
 }

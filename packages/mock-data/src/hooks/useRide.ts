@@ -87,8 +87,11 @@ export function useCancelRide() {
   return useMutation({
     mutationFn: ({ rideId, reason }: { rideId: string; reason: string }) =>
       rideService.cancelRide(rideId, reason),
-    onSuccess: () => {
+    onSuccess: (ride, variables) => {
       queryClient.setQueryData(queryKeys.activeRide, null);
+      // Seed the ride-status cache immediately (not just on the next 1s poll) so
+      // any screen watching this specific ride reflects "cancelled" right away.
+      if (ride) queryClient.setQueryData(queryKeys.rideStatus(variables.rideId), ride);
       queryClient.invalidateQueries({ queryKey: queryKeys.rideHistory });
     },
   });

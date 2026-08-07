@@ -43,6 +43,8 @@ export interface Ride {
   completedAt?: string;
   cancelledAt?: string;
   cancelReason?: string;
+  /** Who initiated the cancellation, when the ride ended up cancelled. */
+  cancelledBy?: "customer" | "driver";
   rating?: number;
   tip?: number;
 }

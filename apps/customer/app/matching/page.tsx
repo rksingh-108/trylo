@@ -4,7 +4,16 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Car, MessageCircle, Phone, X } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage, Button, FareBadge, RatingStars } from "@trylo/ui";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+  Button,
+  CancelRideSheet,
+  CUSTOMER_CANCEL_REASONS,
+  FareBadge,
+  RatingStars,
+} from "@trylo/ui";
 import { useCancelRide, useRideStatus } from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
 
@@ -39,10 +48,12 @@ export default function MatchingPage() {
 
   const { data: ride } = useRideStatus(activeRideId);
   const cancelRide = useCancelRide();
+  const [cancelSheetOpen, setCancelSheetOpen] = React.useState(false);
 
-  async function handleCancel() {
+  async function handleCancel(reason: string) {
     if (!activeRideId) return;
-    await cancelRide.mutateAsync({ rideId: activeRideId, reason: "Cancelled by rider while searching" });
+    await cancelRide.mutateAsync({ rideId: activeRideId, reason });
+    setCancelSheetOpen(false);
     reset();
     router.replace("/home");
   }
@@ -100,7 +111,7 @@ export default function MatchingPage() {
               <h1 className="font-display text-xl font-semibold text-foreground">Finding your driver</h1>
               <p className="mt-1 text-sm text-muted-foreground">Hang tight, matching you with nearby drivers…</p>
             </motion.div>
-            <Button variant="outline" onClick={handleCancel} disabled={cancelRide.isPending}>
+            <Button variant="outline" onClick={() => setCancelSheetOpen(true)} disabled={cancelRide.isPending}>
               <X size={16} />
               Cancel ride
             </Button>
@@ -171,6 +182,14 @@ export default function MatchingPage() {
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      <CancelRideSheet
+        open={cancelSheetOpen}
+        onOpenChange={setCancelSheetOpen}
+        reasons={CUSTOMER_CANCEL_REASONS}
+        onConfirm={handleCancel}
+        isPending={cancelRide.isPending}
+      />
     </div>
   );
 }

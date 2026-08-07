@@ -81,6 +81,7 @@ export function serializeRide(ride: RideWithRelations): Ride {
     completedAt: ride.completedAt?.toISOString(),
     cancelledAt: ride.cancelledAt?.toISOString(),
     cancelReason: ride.cancelReason ?? undefined,
+    cancelledBy: ride.cancelledBy ?? undefined,
     rating: ride.rating ?? undefined,
     tip: ride.tip ?? undefined,
   };

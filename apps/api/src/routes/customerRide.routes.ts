@@ -117,11 +117,18 @@ router.get("/:id/status", requireAuth("customer"), async (req, res) => {
 
 const cancelSchema = z.object({ reason: z.string().default("Cancelled by rider") });
 
+// The rider can back out any time before the driver has physically arrived at
+// pickup — once the driver is waiting (or the trip has started), it's too
+// disruptive to cancel from this endpoint.
 router.post("/:id/cancel", requireAuth("customer"), async (req, res) => {
   const parsed = cancelSchema.safeParse(req.body ?? {});
   const ride = await db.ride.findFirst({ where: { id: req.params.id, riderId: req.auth!.id } });
   if (!ride) {
     res.json(null);
+    return;
+  }
+  if (ride.status !== "requested" && ride.status !== "matched" && ride.status !== "arriving") {
+    res.status(409).json({ error: "This ride can no longer be cancelled" });
     return;
   }
 
@@ -131,6 +138,7 @@ router.post("/:id/cancel", requireAuth("customer"), async (req, res) => {
       status: "cancelled",
       cancelledAt: new Date(),
       cancelReason: parsed.success ? parsed.data.reason : "Cancelled by rider",
+      cancelledBy: "customer",
     },
     include: { driver: true, rider: true },
   });

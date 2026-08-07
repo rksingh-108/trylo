@@ -179,6 +179,7 @@ model Ride {
   completedAt DateTime?
   cancelledAt DateTime?
   cancelReason String?
+  cancelledBy  OwnerRole?
 
   rating Int?
   tip    Int?

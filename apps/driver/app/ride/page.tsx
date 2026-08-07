@@ -8,18 +8,27 @@ import {
   AvatarFallback,
   AnimatedCounter,
   Button,
+  CancelRideSheet,
   Card,
   CardContent,
+  DRIVER_CANCEL_REASONS,
   FareBadge,
   OtpInput,
   PremiumMap,
   RatingStars,
   Skeleton,
   StatusPill,
+  toast,
   WaitingTimer,
 } from "@trylo/ui";
 import type { RouteInfo } from "@trylo/ui";
-import { useActiveDriverRide, useEndRide, useReportLiveLocation, useVerifyRiderOtp } from "@trylo/mock-data/hooks";
+import {
+  useActiveDriverRide,
+  useCancelDriverRide,
+  useEndRide,
+  useReportLiveLocation,
+  useVerifyRiderOtp,
+} from "@trylo/mock-data/hooks";
 import type { Ride } from "@trylo/types";
 
 function initials(name: string) {
@@ -61,18 +70,34 @@ export default function ActiveRidePage() {
   const { data: ride } = useActiveDriverRide();
   const verifyOtp = useVerifyRiderOtp();
   const endRide = useEndRide();
+  const cancelDriverRide = useCancelDriverRide();
   const liveGpsLocation = useReportLiveLocation(Boolean(ride));
 
   const [otp, setOtp] = React.useState("");
   const [otpError, setOtpError] = React.useState<string | null>(null);
   const [completedRide, setCompletedRide] = React.useState<Ride | null>(null);
   const [routeInfo, setRouteInfo] = React.useState<RouteInfo | null>(null);
+  const [cancelSheetOpen, setCancelSheetOpen] = React.useState(false);
+  const cancelHandledRef = React.useRef(false);
 
   React.useEffect(() => {
     if (!ride && !completedRide) {
       router.replace("/dashboard");
     }
   }, [ride, completedRide, router]);
+
+  // Fires only when the *rider* cancels while this screen is open (pushed live
+  // via the ride:updated socket) — a driver-initiated cancel never puts a
+  // "cancelled" ride object into this cache, it clears it to null instead, so
+  // this can't double-fire for the driver's own action.
+  React.useEffect(() => {
+    if (ride?.status !== "cancelled" || cancelHandledRef.current) return;
+    cancelHandledRef.current = true;
+    if (ride.cancelledBy !== "driver") {
+      toast.error("Rider cancelled the ride", { description: ride.cancelReason });
+    }
+    router.replace("/dashboard");
+  }, [ride?.status, ride?.cancelledBy, ride?.cancelReason, router]);
 
   async function handleVerifyOtp() {
     if (!ride) return;
@@ -90,6 +115,14 @@ export default function ActiveRidePage() {
     if (result) setCompletedRide(result);
   }
 
+  async function handleCancelConfirm(reason: string) {
+    if (!ride) return;
+    await cancelDriverRide.mutateAsync({ rideId: ride.id, reason });
+    setCancelSheetOpen(false);
+    toast.success("Ride cancelled");
+    router.replace("/dashboard");
+  }
+
   if (completedRide) {
     return <CompletedSummary ride={completedRide} onDone={() => router.push("/dashboard")} />;
   }
@@ -99,6 +132,7 @@ export default function ActiveRidePage() {
   const isArriving = ride.status === "arriving";
   const isArrived = ride.status === "arrived";
   const isInProgress = ride.status === "in_progress";
+  const canCancel = isArriving || isArrived;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -227,6 +261,17 @@ export default function ActiveRidePage() {
           </Card>
         )}
 
+        {canCancel && (
+          <Button
+            variant="outline"
+            size="lg"
+            className="mt-4 w-full text-destructive"
+            onClick={() => setCancelSheetOpen(true)}
+          >
+            Cancel ride
+          </Button>
+        )}
+
         {isInProgress && (
           <div className="mt-4 flex flex-col gap-3">
             <Card variant="elevated" className="animate-scale-in">
@@ -244,6 +289,14 @@ export default function ActiveRidePage() {
           </div>
         )}
       </div>
+
+      <CancelRideSheet
+        open={cancelSheetOpen}
+        onOpenChange={setCancelSheetOpen}
+        reasons={DRIVER_CANCEL_REASONS}
+        onConfirm={handleCancelConfirm}
+        isPending={cancelDriverRide.isPending}
+      />
     </div>
   );
 }

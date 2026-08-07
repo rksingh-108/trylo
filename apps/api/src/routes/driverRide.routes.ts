@@ -148,6 +148,39 @@ router.get("/rides/active", requireAuth("driver"), async (req, res) => {
   res.json(ride ? serializeRide(ride) : null);
 });
 
+const driverCancelSchema = z.object({ reason: z.string().default("Cancelled by driver") });
+
+// The driver can back out any time after accepting but before the trip has
+// actually started (verified OTP) — once in_progress, they must complete the
+// trip rather than cancel it here.
+router.post("/rides/:rideId/cancel", requireAuth("driver"), async (req, res) => {
+  const parsed = driverCancelSchema.safeParse(req.body ?? {});
+  const ride = await db.ride.findFirst({ where: { id: req.params.rideId, driverId: req.auth!.id } });
+  if (!ride) {
+    res.json(null);
+    return;
+  }
+  if (ride.status !== "arriving" && ride.status !== "arrived") {
+    res.status(409).json({ error: "This ride can no longer be cancelled" });
+    return;
+  }
+
+  const updated = await db.ride.update({
+    where: { id: ride.id },
+    data: {
+      status: "cancelled",
+      cancelledAt: new Date(),
+      cancelReason: parsed.success ? parsed.data.reason : "Cancelled by driver",
+      cancelledBy: "driver",
+    },
+    include: { driver: true, rider: true },
+  });
+  await recordRideStatus(updated.id, "cancelled", updated.cancelReason ?? undefined);
+
+  emitRideUpdated(updated.id, serializeRide(updated));
+  res.json(serializeRide(updated));
+});
+
 const verifyOtpSchema = z.object({ otp: z.string() });
 
 router.post("/rides/:rideId/verify-otp", requireAuth("driver"), async (req, res) => {
