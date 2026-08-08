@@ -7,28 +7,33 @@ const router = Router();
 
 const periodSchema = z.enum(["daily", "weekly", "monthly"]);
 
+// Earnings are computed from DriverEarning rows, not raw completed rides — a
+// completed ride whose payment failed (insufficient rider balance) never gets a
+// DriverEarning record (see the /rides/:rideId/end handler), so it correctly
+// contributes nothing here rather than being counted as money the driver made.
 router.get("/", requireAuth("driver"), async (req, res) => {
   const parsedPeriod = periodSchema.safeParse(req.query.period);
   const period = parsedPeriod.success ? parsedPeriod.data : "daily";
   const windowDays = period === "daily" ? 1 : period === "weekly" ? 7 : 30;
   const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
-  const rides = await db.ride.findMany({
-    where: { driverId: req.auth!.id, status: "completed", completedAt: { gte: cutoff } },
-    orderBy: { completedAt: "desc" },
+  const earnings = await db.driverEarning.findMany({
+    where: { driverId: req.auth!.id, createdAt: { gte: cutoff } },
+    include: { ride: true },
+    orderBy: { createdAt: "desc" },
   });
 
   res.json({
     period,
-    totalEarnings: rides.reduce((sum, r) => sum + r.fareTotal, 0),
-    totalRides: rides.length,
-    totalDistanceKm: Math.round(rides.reduce((sum, r) => sum + r.distanceKm, 0) * 10) / 10,
-    onlineHours: Math.round((rides.length * 0.6 + Math.random() * 2) * 10) / 10,
-    rides: rides.map((r) => ({
-      rideId: r.id,
-      fare: r.fareTotal,
-      distanceKm: r.distanceKm,
-      completedAt: r.completedAt!.toISOString(),
+    totalEarnings: earnings.reduce((sum, e) => sum + e.amount, 0),
+    totalRides: earnings.length,
+    totalDistanceKm: Math.round(earnings.reduce((sum, e) => sum + e.ride.distanceKm, 0) * 10) / 10,
+    onlineHours: Math.round((earnings.length * 0.6 + Math.random() * 2) * 10) / 10,
+    rides: earnings.map((e) => ({
+      rideId: e.rideId,
+      fare: e.amount,
+      distanceKm: e.ride.distanceKm,
+      completedAt: e.createdAt.toISOString(),
     })),
   });
 });

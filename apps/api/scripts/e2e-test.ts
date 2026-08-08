@@ -85,6 +85,7 @@ async function waitFor<T>(
 /** Set once the driver token is known, so the outer wrapper can always take the driver offline again. */
 let capturedDriverToken: string | null = null;
 let capturedCancelDriverToken: string | null = null;
+let capturedPaymentDriverToken: string | null = null;
 
 async function onboardVerifiedOnlineDriver(phone: string, name: string): Promise<{ token: string; driverId: string }> {
   const otpReq = await api<{ devHintOtp: string }>("/api/driver/auth/otp/request", {
@@ -138,6 +139,25 @@ async function createRide(customerToken: string, pickup: { address: string; poin
     body: { pickup, drop, vehicleType: "bike", fare: bikeFare.fare },
   });
   return rideRes.data.id;
+}
+
+/** Drives a ride from 'requested' through acceptance and OTP verification to 'in_progress'. */
+async function progressRideToInProgress(customerToken: string, driverToken: string, rideId: string) {
+  await waitFor(
+    async () => {
+      const acc = await api<{ status: string }>(`/api/driver/requests/${rideId}/accept`, { method: "POST", token: driverToken });
+      return acc.status === 200 && acc.data ? acc : null;
+    },
+    `driver accepts ${rideId}`,
+    10000
+  );
+  const statusRes = await api<{ otp: string }>(`/api/customer/rides/${rideId}/status`, { token: customerToken });
+  const verify = await api<{ success: boolean }>(`/api/driver/rides/${rideId}/verify-otp`, {
+    method: "POST",
+    token: driverToken,
+    body: { otp: statusRes.data.otp },
+  });
+  assert(verify.data.success, `OTP verified for ${rideId}`);
 }
 
 /**
@@ -303,6 +323,228 @@ async function runCancellationScenarios() {
   assert(repeatCancel.status === 409, "cancelling an already-cancelled ride is rejected (409)");
 
   driverSocket.close();
+
+  // Take this driver offline so it doesn't compete with the payment-scenario driver
+  // for ride offers below.
+  await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
+}
+
+/**
+ * Exercises the internal payment system end-to-end: successful debit + driver
+ * earning on completion, a failed payment when the wallet balance is insufficient
+ * (no debit, no earning), and idempotency under both a sequential retry and a
+ * genuinely concurrent duplicate /rides/:rideId/end request. Uses its own
+ * customers + driver so it doesn't disturb the main happy-path run() above.
+ */
+async function runPaymentScenarios() {
+  console.log("\n=== Payment scenarios ===");
+  const suffix = Date.now().toString().slice(-8);
+  const richPhone = `9${suffix}5`;
+  const poorPhone = `9${suffix}6`;
+  const driverPhone = `9${suffix}7`;
+
+  const richOtpReq = await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", {
+    method: "POST",
+    body: { phone: richPhone },
+  });
+  const richVerify = await api<{ token: string }>("/api/customer/auth/otp/verify", {
+    method: "POST",
+    body: { phone: richPhone, otp: richOtpReq.data.devHintOtp },
+  });
+  const richToken = richVerify.data.token;
+  await api("/api/customer/auth/profile", { method: "POST", token: richToken, body: { name: "Rich Payer" } });
+  await api("/api/customer/wallet/topup", { method: "POST", token: richToken, body: { amount: 1000 } });
+
+  // A wallet balance of 1 guarantees insufficiency against any bike fare (base fare alone is 15).
+  const poorOtpReq = await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", {
+    method: "POST",
+    body: { phone: poorPhone },
+  });
+  const poorVerify = await api<{ token: string }>("/api/customer/auth/otp/verify", {
+    method: "POST",
+    body: { phone: poorPhone, otp: poorOtpReq.data.devHintOtp },
+  });
+  const poorToken = poorVerify.data.token;
+  await api("/api/customer/auth/profile", { method: "POST", token: poorToken, body: { name: "Poor Payer" } });
+  await api("/api/customer/wallet/topup", { method: "POST", token: poorToken, body: { amount: 1 } });
+
+  const { token: driverToken } = await onboardVerifiedOnlineDriver(driverPhone, "Payment Test Driver");
+  capturedPaymentDriverToken = driverToken;
+
+  const pickup = { address: "Payment Test Pickup", point: { lat: 12.9716, lng: 77.5946 } };
+  const drop = { address: "Payment Test Drop", point: { lat: 12.99, lng: 77.61 } };
+
+  // ---- Scenario 1: successful payment ----
+  const ride1 = await createRide(richToken, pickup, drop);
+  await progressRideToInProgress(richToken, driverToken, ride1);
+
+  const walletBefore1 = await api<{ balance: number }>("/api/customer/wallet", { token: richToken });
+  const earningsBefore1 = await api<{ totalEarnings: number; totalRides: number }>("/api/driver/earnings", {
+    token: driverToken,
+    query: { period: "monthly" },
+  });
+
+  const end1 = await api<{ status: string; paymentStatus: string; fare: { total: number } }>(
+    `/api/driver/rides/${ride1}/end`,
+    { method: "POST", token: driverToken }
+  );
+  assert(
+    end1.data.status === "completed" && end1.data.paymentStatus === "paid",
+    "successful payment: ride completed, paymentStatus = paid"
+  );
+
+  const walletAfter1 = await api<{ balance: number; transactions: Array<{ rideId?: string }> }>(
+    "/api/customer/wallet",
+    { token: richToken }
+  );
+  assert(
+    walletAfter1.data.balance === walletBefore1.data.balance - end1.data.fare.total,
+    "wallet debited by exactly the fare total"
+  );
+  assert(
+    walletAfter1.data.transactions.filter((t) => t.rideId === ride1).length === 1,
+    "exactly one wallet transaction recorded for this ride"
+  );
+
+  const earningsAfter1 = await api<{ totalEarnings: number; totalRides: number }>("/api/driver/earnings", {
+    token: driverToken,
+    query: { period: "monthly" },
+  });
+  assert(
+    earningsAfter1.data.totalEarnings === earningsBefore1.data.totalEarnings + end1.data.fare.total,
+    "driver earnings increased by exactly the fare total"
+  );
+  assert(
+    earningsAfter1.data.totalRides === earningsBefore1.data.totalRides + 1,
+    "driver's paid-ride count incremented by exactly one"
+  );
+
+  // ---- Scenario 2: insufficient wallet balance ----
+  const ride2 = await createRide(poorToken, pickup, drop);
+  await progressRideToInProgress(poorToken, driverToken, ride2);
+
+  const walletBefore2 = await api<{ balance: number }>("/api/customer/wallet", { token: poorToken });
+  const earningsBefore2 = await api<{ totalEarnings: number; totalRides: number }>("/api/driver/earnings", {
+    token: driverToken,
+    query: { period: "monthly" },
+  });
+
+  const end2 = await api<{ status: string; paymentStatus: string }>(`/api/driver/rides/${ride2}/end`, {
+    method: "POST",
+    token: driverToken,
+  });
+  assert(
+    end2.data.status === "completed" && end2.data.paymentStatus === "failed",
+    "insufficient balance: ride still completes, paymentStatus = failed"
+  );
+
+  const walletAfter2 = await api<{ balance: number; transactions: Array<{ rideId?: string }> }>(
+    "/api/customer/wallet",
+    { token: poorToken }
+  );
+  assert(walletAfter2.data.balance === walletBefore2.data.balance, "wallet balance untouched when payment fails");
+  assert(
+    !walletAfter2.data.transactions.some((t) => t.rideId === ride2),
+    "no wallet transaction recorded for the failed-payment ride"
+  );
+
+  const earningsAfter2 = await api<{ totalEarnings: number; totalRides: number }>("/api/driver/earnings", {
+    token: driverToken,
+    query: { period: "monthly" },
+  });
+  assert(earningsAfter2.data.totalEarnings === earningsBefore2.data.totalEarnings, "driver earnings unchanged when payment fails");
+  assert(earningsAfter2.data.totalRides === earningsBefore2.data.totalRides, "driver's paid-ride count unchanged when payment fails");
+
+  // ---- Scenario 3: duplicate completion request (sequential retry) never double-charges ----
+  const ride3 = await createRide(richToken, pickup, drop);
+  await progressRideToInProgress(richToken, driverToken, ride3);
+
+  const end3a = await api<{ paymentStatus: string }>(`/api/driver/rides/${ride3}/end`, {
+    method: "POST",
+    token: driverToken,
+  });
+  assert(end3a.data.paymentStatus === "paid", "ride3 first completion succeeds and is paid");
+  const walletAfter3a = await api<{ balance: number }>("/api/customer/wallet", { token: richToken });
+
+  const end3b = await api<{ status: string; paymentStatus: string }>(`/api/driver/rides/${ride3}/end`, {
+    method: "POST",
+    token: driverToken,
+  });
+  assert(
+    end3b.data.status === "completed" && end3b.data.paymentStatus === "paid",
+    "retried completion request returns the same completed+paid state instead of reprocessing"
+  );
+
+  const walletAfter3b = await api<{ balance: number; transactions: Array<{ rideId?: string }> }>(
+    "/api/customer/wallet",
+    { token: richToken }
+  );
+  assert(walletAfter3b.data.balance === walletAfter3a.data.balance, "retrying /end does not debit the wallet a second time");
+  assert(
+    walletAfter3b.data.transactions.filter((t) => t.rideId === ride3).length === 1,
+    "retrying /end never creates a second wallet transaction for the same ride"
+  );
+
+  // ---- Scenario 4: a genuinely concurrent duplicate /end call never double-charges ----
+  const ride4 = await createRide(richToken, pickup, drop);
+  await progressRideToInProgress(richToken, driverToken, ride4);
+
+  const walletBefore4 = await api<{ balance: number }>("/api/customer/wallet", { token: richToken });
+  const [race4a, race4b] = await Promise.all([
+    api<{ status: string }>(`/api/driver/rides/${ride4}/end`, { method: "POST", token: driverToken }),
+    api<{ status: string }>(`/api/driver/rides/${ride4}/end`, { method: "POST", token: driverToken }),
+  ]);
+  assert(
+    race4a.data.status === "completed" && race4b.data.status === "completed",
+    "both concurrent completion requests see the ride as completed"
+  );
+
+  // The loser of the race can observe the ride mid-flight (status flipped to
+  // 'completed' but payment not yet processed) — poll until it settles rather
+  // than asserting on the race responses themselves.
+  const settled4 = await waitFor(
+    async () => {
+      const status = await api<{ paymentStatus: string; fare: { total: number } }>(
+        `/api/customer/rides/${ride4}/status`,
+        { token: richToken }
+      );
+      return status.data.paymentStatus !== "pending" ? status : null;
+    },
+    "ride4 payment settles to a final status after the race",
+    5000
+  );
+  assert(settled4.data.paymentStatus === "paid", "ride4 payment settles to 'paid' exactly once despite the concurrent race");
+
+  const walletAfter4 = await api<{ balance: number; transactions: Array<{ rideId?: string }> }>(
+    "/api/customer/wallet",
+    { token: richToken }
+  );
+  assert(
+    walletAfter4.data.balance === walletBefore4.data.balance - settled4.data.fare.total,
+    "concurrent duplicate /end calls debit the wallet exactly once, not twice"
+  );
+  assert(
+    walletAfter4.data.transactions.filter((t) => t.rideId === ride4).length === 1,
+    "concurrent duplicate /end calls create exactly one wallet transaction"
+  );
+
+  // ---- Scenario 5: a cancelled ride creates no payment or earning ----
+  const ride5 = await createRide(richToken, pickup, drop);
+  const cancel5 = await api<{ status: string; paymentStatus: string }>(`/api/customer/rides/${ride5}/cancel`, {
+    method: "POST",
+    token: richToken,
+    body: { reason: "Changed my mind" },
+  });
+  assert(
+    cancel5.data.status === "cancelled" && cancel5.data.paymentStatus === "pending",
+    "a cancelled ride's paymentStatus stays 'pending', never paid or failed"
+  );
+  const walletAfter5 = await api<{ transactions: Array<{ rideId?: string }> }>("/api/customer/wallet", {
+    token: richToken,
+  });
+  assert(!walletAfter5.data.transactions.some((t) => t.rideId === ride5), "cancelling a ride never creates a wallet transaction");
+
+  await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
 }
 
 async function run() {
@@ -611,6 +853,7 @@ async function run() {
   await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
 
   await runCancellationScenarios();
+  await runPaymentScenarios();
 }
 
 run()
@@ -632,6 +875,13 @@ run()
       await api("/api/driver/status", {
         method: "POST",
         token: capturedCancelDriverToken,
+        body: { isOnline: false },
+      }).catch(() => {});
+    }
+    if (capturedPaymentDriverToken) {
+      await api("/api/driver/status", {
+        method: "POST",
+        token: capturedPaymentDriverToken,
         body: { isOnline: false },
       }).catch(() => {});
     }

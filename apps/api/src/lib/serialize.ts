@@ -84,5 +84,6 @@ export function serializeRide(ride: RideWithRelations): Ride {
     cancelledBy: ride.cancelledBy ?? undefined,
     rating: ride.rating ?? undefined,
     tip: ride.tip ?? undefined,
+    paymentStatus: ride.paymentStatus,
   };
 }

@@ -5,6 +5,8 @@ export interface WalletTransaction {
   amount: number;
   description: string;
   createdAt: string;
+  /** Present on the 'ride' category debit created when a ride's fare is settled. */
+  rideId?: string;
 }
 
 export interface Wallet {

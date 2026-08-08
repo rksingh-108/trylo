@@ -47,6 +47,12 @@ export interface Ride {
   cancelledBy?: "customer" | "driver";
   rating?: number;
   tip?: number;
+  /**
+   * 'pending' until the ride completes; then 'paid' once the fare is debited from
+   * the rider's wallet, or 'failed' if the wallet balance was insufficient. Stays
+   * 'pending' forever for a ride that never completes (e.g. cancelled).
+   */
+  paymentStatus: "pending" | "paid" | "failed";
 }
 
 export interface FareBreakdown {

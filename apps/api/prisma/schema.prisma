@@ -84,6 +84,12 @@ enum OwnerRole {
   driver
 }
 
+enum PaymentStatus {
+  pending
+  paid
+  failed
+}
+
 model User {
   id            String   @id @default(cuid())
   phone         String   @unique
@@ -125,6 +131,7 @@ model Driver {
   kycDocuments  KycDocument[]
   rides         Ride[]
   payouts       PayoutRecord[]
+  earnings      DriverEarning[]
 }
 
 model KycDocument {
@@ -181,10 +188,17 @@ model Ride {
   cancelReason String?
   cancelledBy  OwnerRole?
 
+  /// Set to 'paid' or 'failed' exactly once, when the ride is completed (see the
+  /// driver's /rides/:rideId/end handler). Stays 'pending' for rides that never
+  /// reach completion (still in flight, or cancelled).
+  paymentStatus PaymentStatus @default(pending)
+
   rating Int?
   tip    Int?
 
-  statusHistory RideStatusHistory[]
+  statusHistory      RideStatusHistory[]
+  walletTransactions WalletTransaction[]
+  driverEarning      DriverEarning?
 
   @@index([riderId])
   @@index([driverId])
@@ -237,7 +251,27 @@ model WalletTransaction {
   description String
   createdAt   DateTime          @default(now())
 
+  /// Set only for category = 'ride' debits. Unique so the ride-completion debit
+  /// can never be recorded twice for the same ride, even under a concurrent retry.
+  rideId String? @unique
+  ride   Ride?   @relation(fields: [rideId], references: [id])
+
   @@index([userId])
+}
+
+/// One row per ride whose payment succeeded — the source of truth for driver
+/// earnings. rideId is unique so a ride can only ever produce one earning record,
+/// even under a concurrent duplicate /rides/:rideId/end call.
+model DriverEarning {
+  id        String   @id @default(cuid())
+  driverId  String
+  driver    Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  rideId    String   @unique
+  ride      Ride     @relation(fields: [rideId], references: [id])
+  amount    Int
+  createdAt DateTime @default(now())
+
+  @@index([driverId])
 }
 
 model PayoutRecord {

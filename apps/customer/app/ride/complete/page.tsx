@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage, Button, cn, FareBadge, RatingStars, toast } from "@trylo/ui";
 import { useRateRide, useRideDetail } from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
@@ -47,6 +47,8 @@ export default function RideCompletePage() {
 
   if (!activeRideId || !ride) return null;
 
+  const paymentFailed = ride.paymentStatus === "failed";
+
   return (
     <div className="flex flex-1 flex-col px-6 pb-8 pt-10">
       <div className="flex flex-col items-center gap-3 text-center">
@@ -55,13 +57,16 @@ export default function RideCompletePage() {
             initial={{ scale: 0.4, opacity: 0.6 }}
             animate={{ scale: 2, opacity: 0 }}
             transition={{ duration: 1.1, ease: "easeOut", delay: 0.15 }}
-            className="absolute inset-0 rounded-full bg-success/30"
+            className={cn("absolute inset-0 rounded-full", paymentFailed ? "bg-destructive/25" : "bg-success/30")}
           />
           <motion.span
             initial={{ scale: 0.5, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 260, damping: 16, delay: 0.05 }}
-            className="grid h-16 w-16 place-items-center rounded-full bg-success/15"
+            className={cn(
+              "grid h-16 w-16 place-items-center rounded-full",
+              paymentFailed ? "bg-destructive/15" : "bg-success/15"
+            )}
           >
             <motion.span
               initial={{ scale: 0, rotate: -25 }}
@@ -69,15 +74,42 @@ export default function RideCompletePage() {
               transition={{ type: "spring", stiffness: 300, damping: 14, delay: 0.25 }}
               className="grid place-items-center"
             >
-              <CheckCircle2 size={30} className="text-success" />
+              {paymentFailed ? (
+                <AlertTriangle size={30} className="text-destructive" />
+              ) : (
+                <CheckCircle2 size={30} className="text-success" />
+              )}
             </motion.span>
           </motion.span>
         </div>
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }}>
-          <h1 className="font-display text-xl font-semibold text-foreground">Ride complete</h1>
-          <p className="text-sm text-muted-foreground">Hope you had a great trip!</p>
+          <h1 className="font-display text-xl font-semibold text-foreground">
+            {paymentFailed ? "Payment failed" : "Ride complete"}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {paymentFailed
+              ? "Your wallet balance was too low to cover this ride's fare."
+              : "Hope you had a great trip!"}
+          </p>
         </motion.div>
       </div>
+
+      {paymentFailed && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.36 }}
+          className="mt-6 flex flex-col gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-4"
+        >
+          <p className="text-sm text-foreground">
+            This trip is unpaid. Add money to your wallet to settle the balance — your account will show this as
+            outstanding until then.
+          </p>
+          <Button size="sm" variant="outline" className="text-destructive" onClick={() => router.push("/wallet")}>
+            Go to wallet
+          </Button>
+        </motion.div>
+      )}
 
       {ride.driver && (
         <motion.div
@@ -167,8 +199,15 @@ export default function RideCompletePage() {
           </div>
         )}
         <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-          <span className="font-display text-base font-semibold text-foreground">Total paid</span>
-          <FareBadge amount={ride.fare.total + tip} className="text-lg" />
+          <span
+            className={cn(
+              "font-display text-base font-semibold",
+              paymentFailed ? "text-destructive" : "text-foreground"
+            )}
+          >
+            {paymentFailed ? "Amount due" : "Total paid"}
+          </span>
+          <FareBadge amount={ride.fare.total + tip} className={cn("text-lg", paymentFailed && "text-destructive")} />
         </div>
       </motion.div>
 

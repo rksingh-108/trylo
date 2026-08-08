@@ -21,6 +21,7 @@ async function getWalletPayload(userId: string) {
       amount: t.amount,
       description: t.description,
       createdAt: t.createdAt.toISOString(),
+      rideId: t.rideId ?? undefined,
     })),
   };
 }
