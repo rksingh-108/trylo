@@ -8,9 +8,12 @@ services:
       POSTGRES_PASSWORD: trylo_dev_password
       POSTGRES_DB: trylo
     ports:
-      # Host 55432 -> container 5432. A different host port is used deliberately
+      # Host 55448 -> container 5432. A different host port is used deliberately
       # so this never conflicts with any existing local PostgreSQL install.
-      - "55432:5432"
+      # (55432 sits inside a Windows/Hyper-V dynamic port-exclusion range on this
+      # machine, which permanently blocks binding to it — 55448 is the verified-free
+      # port this project's .env is configured to use.)
+      - "55448:5432"
     volumes:
       - trylo_postgres_data:/var/lib/postgresql/data
 

@@ -44,6 +44,13 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+where powershell >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: "powershell" was not found on PATH. It is required for reliable
+    echo Docker-readiness checks and duplicate-process detection.
+    pause
+    exit /b 1
+)
 
 :: ---------------------------------------------------------------
 :: 1. Docker Desktop / Docker Engine
@@ -52,7 +59,7 @@ echo [1/7] Checking Docker Engine...
 
 :: NOTE: a bare "docker info" can hang for a long time (60s+) when the
 :: daemon is completely unreachable, instead of failing fast. :docker_check_fast
-:: below bounds that check to 5 seconds via PowerShell's process timeout, so
+:: below bounds that check to 8 seconds via PowerShell's job timeout, so
 :: this script's waits stay predictable regardless of Docker Desktop's
 :: internal architecture (which Windows services it does or doesn't use has
 :: been observed to change across Docker Desktop versions/updates).
@@ -83,9 +90,9 @@ if errorlevel 1 (
     echo       Docker Desktop process is already running, waiting for its engine...
 )
 
-echo       Waiting up to 30 seconds for the Docker Engine to come up...
+echo       Waiting up to 60 seconds for the Docker Engine to come up...
 set "DOCKER_READY=0"
-for /l %%i in (1,1,6) do (
+for /l %%i in (1,1,12) do (
     call :docker_check_fast
     if "!DOCKER_UP!"=="1" (
         set "DOCKER_READY=1"
@@ -101,7 +108,7 @@ if "!DOCKER_READY!"=="0" (
     echo This usually means Docker Desktop needs to be started with
     echo Administrator privileges - this script cannot elevate itself.
     echo.
-    echo Please start Docker Desktop as Administrator and run START_TRYLO.bat again.
+    echo Please start Docker Desktop as Administrator and run start-trylo.bat again.
     pause
     exit /b 1
 )
@@ -111,16 +118,20 @@ echo       Docker Engine is ready.
 echo.
 
 :: ---------------------------------------------------------------
-:: 2. PostgreSQL container
+:: 2. PostgreSQL container (trylo-postgres, from docker-compose.yml)
 :: ---------------------------------------------------------------
 echo [2/7] Starting PostgreSQL container...
 docker ps --filter "name=trylo-postgres" --filter "status=running" --format "{{.Names}}" 2>nul | findstr /i "trylo-postgres" >nul
 if not errorlevel 1 (
     echo       PostgreSQL container is already running.
 ) else (
+    REM "docker compose up -d" starts the container if it exists but is stopped,
+    REM or creates it fresh from docker-compose.yml if it doesn't exist at all -
+    REM either way this is the correct, idempotent way to bring it up.
     call pnpm db:up
     if errorlevel 1 (
         echo ERROR: "pnpm db:up" failed to start the PostgreSQL container.
+        echo Check "docker compose ps" and "docker compose logs postgres" for details.
         pause
         exit /b 1
     )
@@ -145,12 +156,16 @@ if not errorlevel 1 (
 echo.
 
 :: ---------------------------------------------------------------
-:: 3. API server (port 4000)
+:: 3. API server (port 4000) - pnpm dev:api (apps/api: tsx watch src/index.ts)
 :: ---------------------------------------------------------------
 echo [3/7] Starting API server...
-call :port_in_use 4000
-if "!PORT_BUSY!"=="1" (
-    echo       API server already running on port 4000.
+call :check_port 4000
+if "!PORT_STATUS!"=="TRYLO" (
+    echo       API server already running on port 4000 - skipping.
+) else if "!PORT_STATUS!"=="OTHER" (
+    echo       WARNING: Port 4000 is in use by a process that does not look like
+    echo       TRYLO ^(PID !PORT_PID!^). Not starting a second API server on this
+    echo       port - stop whatever is using it, or run stop-trylo.bat first.
 ) else (
     start "TRYLO API - port 4000" cmd /k "cd /d "%PROJECT_ROOT%" && pnpm dev:api"
     echo       API server launching in a new window...
@@ -158,12 +173,16 @@ if "!PORT_BUSY!"=="1" (
 echo.
 
 :: ---------------------------------------------------------------
-:: 4. Customer app (port 3000)
+:: 4. Customer app (port 3000) - pnpm dev:customer (next dev --port 3000)
 :: ---------------------------------------------------------------
 echo [4/7] Starting Customer app...
-call :port_in_use 3000
-if "!PORT_BUSY!"=="1" (
-    echo       Customer app already running on port 3000.
+call :check_port 3000
+if "!PORT_STATUS!"=="TRYLO" (
+    echo       Customer app already running on port 3000 - skipping.
+) else if "!PORT_STATUS!"=="OTHER" (
+    echo       WARNING: Port 3000 is in use by a process that does not look like
+    echo       TRYLO ^(PID !PORT_PID!^). Not starting a second Customer app on this
+    echo       port - stop whatever is using it, or run stop-trylo.bat first.
 ) else (
     start "TRYLO Customer - port 3000" cmd /k "cd /d "%PROJECT_ROOT%" && pnpm dev:customer"
     echo       Customer app launching in a new window...
@@ -171,12 +190,16 @@ if "!PORT_BUSY!"=="1" (
 echo.
 
 :: ---------------------------------------------------------------
-:: 5. Driver app (port 3001)
+:: 5. Driver app (port 3001) - pnpm dev:driver (next dev --port 3001)
 :: ---------------------------------------------------------------
 echo [5/7] Starting Driver app...
-call :port_in_use 3001
-if "!PORT_BUSY!"=="1" (
-    echo       Driver app already running on port 3001.
+call :check_port 3001
+if "!PORT_STATUS!"=="TRYLO" (
+    echo       Driver app already running on port 3001 - skipping.
+) else if "!PORT_STATUS!"=="OTHER" (
+    echo       WARNING: Port 3001 is in use by a process that does not look like
+    echo       TRYLO ^(PID !PORT_PID!^). Not starting a second Driver app on this
+    echo       port - stop whatever is using it, or run stop-trylo.bat first.
 ) else (
     start "TRYLO Driver - port 3001" cmd /k "cd /d "%PROJECT_ROOT%" && pnpm dev:driver"
     echo       Driver app launching in a new window...
@@ -184,12 +207,16 @@ if "!PORT_BUSY!"=="1" (
 echo.
 
 :: ---------------------------------------------------------------
-:: 6. Admin app (port 3002)
+:: 6. Admin app (port 3002) - pnpm dev:admin (next dev --port 3002)
 :: ---------------------------------------------------------------
 echo [6/7] Starting Admin app...
-call :port_in_use 3002
-if "!PORT_BUSY!"=="1" (
-    echo       Admin app already running on port 3002.
+call :check_port 3002
+if "!PORT_STATUS!"=="TRYLO" (
+    echo       Admin app already running on port 3002 - skipping.
+) else if "!PORT_STATUS!"=="OTHER" (
+    echo       WARNING: Port 3002 is in use by a process that does not look like
+    echo       TRYLO ^(PID !PORT_PID!^). Not starting a second Admin app on this
+    echo       port - stop whatever is using it, or run stop-trylo.bat first.
 ) else (
     start "TRYLO Admin - port 3002" cmd /k "cd /d "%PROJECT_ROOT%" && pnpm dev:admin"
     echo       Admin app launching in a new window...
@@ -222,11 +249,11 @@ echo   Driver app:     http://localhost:3001
 echo   Admin app:      http://localhost:3002
 echo   API server:     http://localhost:4000
 echo   API health:     http://localhost:4000/health
-echo   PostgreSQL:     localhost:55432  (container: trylo-postgres)
+echo   PostgreSQL:     localhost:55448  (container: trylo-postgres)
 echo ============================================
 echo.
 echo Each service is running in its own terminal window.
-echo Close those windows, or run STOP_TRYLO.bat, to stop everything.
+echo Close those windows, or run stop-trylo.bat, to stop everything.
 echo.
 pause
 exit /b 0
@@ -243,17 +270,26 @@ exit /b 0
 :: the daemon is unreachable (it can hang 60s+).
 set "DOCKER_UP=0"
 set "DOCKER_PS_RESULT="
-for /f "usebackq delims=" %%r in (`powershell -NoProfile -Command "$job = Start-Job -ScriptBlock { & docker info *> $null; $LASTEXITCODE }; if (Wait-Job $job -Timeout 8) { $rc = Receive-Job $job; Remove-Job $job -Force; if ($rc -eq 0) { 'UP' } else { 'DOWN' } } else { Remove-Job $job -Force; 'DOWN' }" 2^>nul`) do set "DOCKER_PS_RESULT=%%r"
+for /f "usebackq delims=" %%r in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\docker-check-fast.ps1" 2^>nul`) do set "DOCKER_PS_RESULT=%%r"
 if /i "!DOCKER_PS_RESULT!"=="UP" set "DOCKER_UP=1"
 goto :eof
 
-:port_in_use
+:check_port
+:: Sets PORT_STATUS to FREE / TRYLO / OTHER for the given port, and PORT_PID
+:: to the owning process id (blank if free). "TRYLO" means the owning
+:: process's command line references this project's own root folder (the
+:: same technique scripts\kill-project-node.ps1 already uses for cleanup) -
+:: this is what lets the script tell "our own dev server is already up,
+:: skip it" apart from "some unrelated process happens to be squatting this
+:: port, don't touch it and don't pretend we're running".
 setlocal
 set "PORT=%~1"
-set "RESULT=0"
-netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul
-if not errorlevel 1 set "RESULT=1"
-endlocal & set "PORT_BUSY=%RESULT%"
+set "RESULT="
+for /f "usebackq delims=" %%r in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\check-port.ps1" -Port %PORT% -ProjectRoot "%PROJECT_ROOT%" 2^>nul`) do set "RESULT=%%r"
+if not defined RESULT set "RESULT=FREE|"
+for /f "tokens=1,2 delims=|" %%a in ("!RESULT!") do (
+    endlocal & set "PORT_STATUS=%%a" & set "PORT_PID=%%b"
+)
 exit /b 0
 
 :wait_for_http

@@ -12,7 +12,7 @@ echo.
 
 cd /d "%PROJECT_ROOT%"
 
-echo [1/5] Stopping Customer app (port 3000)...
+echo [1/6] Stopping Customer app (port 3000)...
 call :kill_port 3000
 
 echo [2/6] Stopping Driver app (port 3001)...
@@ -43,14 +43,23 @@ if errorlevel 1 (
     ) else (
         docker ps --filter "name=trylo-postgres" --format "{{.Names}}" 2>nul | findstr /i "trylo-postgres" >nul
         if not errorlevel 1 (
+            REM "docker stop" only stops the container - it does NOT remove the
+            REM container, its data volume, or any image. Deliberately not using
+            REM "docker compose down", which removes the container, or its "-v"
+            REM form, which would additionally remove the data volume.
             docker stop trylo-postgres >nul 2>&1
             if errorlevel 1 (
                 echo       WARNING: Failed to stop the trylo-postgres container.
             ) else (
-                echo       PostgreSQL container stopped. Data volume was NOT removed.
+                echo       PostgreSQL container stopped. Container, data volume, and image were NOT removed.
             )
         ) else (
-            echo       PostgreSQL container is not running - nothing to stop.
+            docker ps -a --filter "name=trylo-postgres" --format "{{.Names}}" 2>nul | findstr /i "trylo-postgres" >nul
+            if not errorlevel 1 (
+                echo       PostgreSQL container already stopped - nothing to do.
+            ) else (
+                echo       No trylo-postgres container found ^(nothing has been created yet^).
+            )
         )
     )
 )
@@ -66,11 +75,26 @@ if errorlevel 1 (
 echo.
 
 echo ============================================
+echo   Verifying shutdown...
+echo ============================================
+call :report_port 3000 "Customer app"
+call :report_port 3001 "Driver app"
+call :report_port 3002 "Admin app"
+call :report_port 4000 "API server"
+for /f "tokens=*" %%s in ('docker ps --filter "name=trylo-postgres" --format "{{.Status}}" 2^>nul') do set "PG_RUNNING=%%s"
+if defined PG_RUNNING (
+    echo   [WARNING] PostgreSQL container: still running ^(%PG_RUNNING%^)
+) else (
+    echo   [OK] PostgreSQL container: stopped
+)
+echo.
+
+echo ============================================
 echo   TRYLO has been stopped safely.
-echo   - Customer / Driver / API dev servers: stopped
-echo   - PostgreSQL container: stopped (data preserved)
-echo   - No files, data, or Docker volumes were deleted
-echo   Restart everything anytime with START_TRYLO.bat
+echo   - Customer / Driver / Admin / API dev servers: stopped
+echo   - PostgreSQL container: stopped (container, data, and image preserved)
+echo   - No files, data, volumes, or images were deleted
+echo   Restart everything anytime with start-trylo.bat
 echo ============================================
 pause
 exit /b 0
@@ -89,5 +113,18 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%PORT% " ^| findstr "LISTEN
     taskkill /PID %%p /F >nul 2>&1
 )
 if "!FOUND!"=="0" echo       No process found on port %PORT%.
+endlocal
+exit /b 0
+
+:report_port
+setlocal
+set "PORT=%~1"
+set "LABEL=%~2"
+netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul
+if errorlevel 1 (
+    echo   [OK] %LABEL% (port %PORT%^): stopped
+) else (
+    echo   [WARNING] %LABEL% (port %PORT%^): still listening
+)
 endlocal
 exit /b 0
