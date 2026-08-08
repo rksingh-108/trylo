@@ -82,12 +82,18 @@ enum OtpPurpose {
 enum OwnerRole {
   customer
   driver
+  admin
 }
 
 enum PaymentStatus {
   pending
   paid
   failed
+}
+
+enum AdminActionTarget {
+  driver
+  customer
 }
 
 model User {
@@ -97,6 +103,7 @@ model User {
   email         String?
   rating        Float    @default(5)
   walletBalance Int      @default(0)
+  suspended     Boolean  @default(false)
   createdAt     DateTime @default(now())
 
   rides            Ride[]
@@ -119,6 +126,7 @@ model Driver {
   verificationStatus  DriverVerificationStatus  @default(pending)
   isOnline            Boolean                   @default(false)
   onlineSince         DateTime?
+  suspended           Boolean                   @default(false)
   lat                 Float
   lng                 Float
   createdAt           DateTime                  @default(now())
@@ -336,4 +344,32 @@ model PromoCode {
   active          Boolean   @default(true)
   expiresAt       DateTime?
   createdAt       DateTime  @default(now())
+}
+
+model Admin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+
+  actions AdminActionLog[]
+}
+
+/// Generic audit trail for admin mutations (driver approve/reject/suspend,
+/// customer suspend, etc.) — one row per action, targetId is a free-form
+/// reference into whichever table targetType names (no formal FK, since a
+/// single relation can't point at two different target tables).
+model AdminActionLog {
+  id         String             @id @default(cuid())
+  adminId    String
+  admin      Admin              @relation(fields: [adminId], references: [id])
+  action     String
+  targetType AdminActionTarget
+  targetId   String
+  note       String?
+  createdAt  DateTime           @default(now())
+
+  @@index([targetType, targetId])
+  @@index([adminId])
 }

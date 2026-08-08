@@ -10,6 +10,8 @@ export type RideStatus =
   | "completed"
   | "cancelled";
 
+export type PaymentStatus = "pending" | "paid" | "failed";
+
 export interface RideLocation {
   address: string;
   point: GeoPoint;
@@ -52,7 +54,7 @@ export interface Ride {
    * the rider's wallet, or 'failed' if the wallet balance was insufficient. Stays
    * 'pending' forever for a ride that never completes (e.g. cancelled).
    */
-  paymentStatus: "pending" | "paid" | "failed";
+  paymentStatus: PaymentStatus;
 }
 
 export interface FareBreakdown {

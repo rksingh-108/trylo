@@ -81,7 +81,10 @@ export function serializeRide(ride: RideWithRelations): Ride {
     completedAt: ride.completedAt?.toISOString(),
     cancelledAt: ride.cancelledAt?.toISOString(),
     cancelReason: ride.cancelReason ?? undefined,
-    cancelledBy: ride.cancelledBy ?? undefined,
+    // cancelledBy is only ever written as "customer" or "driver" by the existing
+    // cancellation routes — "admin" is not a valid value here, it only exists on
+    // the shared OwnerRole enum because Session/AdminActionLog reuse it.
+    cancelledBy: ride.cancelledBy === "admin" ? undefined : ride.cancelledBy ?? undefined,
     rating: ride.rating ?? undefined,
     tip: ride.tip ?? undefined,
     paymentStatus: ride.paymentStatus,

@@ -9,7 +9,8 @@
     "check-types": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "e2e": "tsx scripts/e2e-test.ts"
+    "e2e": "tsx scripts/e2e-test.ts",
+    "seed:admin": "tsx scripts/seed-admin.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

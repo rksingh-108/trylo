@@ -15,6 +15,7 @@ export interface VerifyDriverOtpResult {
   success: boolean;
   isNewDriver: boolean;
   driver: Driver | null;
+  reason?: "suspended";
 }
 
 export async function verifyDriverOtp(phone: string, otp: string): Promise<VerifyDriverOtpResult> {

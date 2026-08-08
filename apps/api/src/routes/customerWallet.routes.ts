@@ -2,29 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db";
 import { requireAuth } from "../auth/middleware";
+import { getWalletPayload } from "../lib/wallet";
 
 const router = Router();
-
-async function getWalletPayload(userId: string) {
-  const user = await db.user.findUniqueOrThrow({ where: { id: userId } });
-  const transactions = await db.walletTransaction.findMany({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-  });
-  return {
-    balance: user.walletBalance,
-    currency: "INR" as const,
-    transactions: transactions.map((t) => ({
-      id: t.id,
-      type: t.type,
-      category: t.category,
-      amount: t.amount,
-      description: t.description,
-      createdAt: t.createdAt.toISOString(),
-      rideId: t.rideId ?? undefined,
-    })),
-  };
-}
 
 router.get("/", requireAuth("customer"), async (req, res) => {
   res.json(await getWalletPayload(req.auth!.id));

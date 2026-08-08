@@ -5,6 +5,8 @@
  * just REST polling). Run with `pnpm --filter api e2e`.
  */
 import { io } from "socket.io-client";
+import { db } from "../src/db";
+import { hashPassword } from "../src/auth/password";
 
 const API = process.env.API_URL ?? "http://localhost:4000";
 let failures = 0;
@@ -86,6 +88,7 @@ async function waitFor<T>(
 let capturedDriverToken: string | null = null;
 let capturedCancelDriverToken: string | null = null;
 let capturedPaymentDriverToken: string | null = null;
+let capturedAdminScenarioDriverToken: string | null = null;
 
 async function onboardVerifiedOnlineDriver(phone: string, name: string): Promise<{ token: string; driverId: string }> {
   const otpReq = await api<{ devHintOtp: string }>("/api/driver/auth/otp/request", {
@@ -547,6 +550,248 @@ async function runPaymentScenarios() {
   await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
 }
 
+/**
+ * Onboards a driver up through KYC-doc upload and vehicle submission, but
+ * deliberately never polls /kyc or /verification-status — those routes are what
+ * lazily trigger the demo auto-verify (see lib/kyc.ts), so skipping them leaves
+ * the driver genuinely stuck at verificationStatus 'pending' for the admin
+ * approve/reject scenarios below to act on.
+ */
+async function createUnverifiedDriver(phone: string, name: string): Promise<{ token: string; driverId: string }> {
+  const otpReq = await api<{ devHintOtp: string }>("/api/driver/auth/otp/request", { method: "POST", body: { phone } });
+  const verify = await api<{ token: string; driver: { id: string } }>("/api/driver/auth/otp/verify", {
+    method: "POST",
+    body: { phone, otp: otpReq.data.devHintOtp },
+  });
+  const token = verify.data.token;
+
+  const kycList = await api<Array<{ id: string; type: string }>>("/api/driver/auth/kyc", { token });
+  for (const doc of kycList.data) {
+    await api(`/api/driver/auth/kyc/${doc.id}/upload`, { method: "POST", token, body: { fileName: `${doc.type}.jpg` } });
+  }
+  await api("/api/driver/auth/vehicle", {
+    method: "POST",
+    token,
+    body: { name, vehicleType: "bike", make: "Honda", model: "Activa", registrationNumber: "KA05AD0001", color: "Grey" },
+  });
+
+  return { token, driverId: verify.data.driver.id };
+}
+
+/**
+ * Exercises the admin panel end-to-end: role-boundary enforcement (customer/driver
+ * tokens rejected on /api/admin/*), dashboard stats, driver approve/reject, customer
+ * and driver suspend/unsuspend (including that suspension actually blocks ride
+ * creation / going online, not just flips a flag), and ride/payment list filtering.
+ * Bootstraps its own throwaway admin via a direct db write — justified because
+ * there's intentionally no public admin-signup HTTP endpoint to black-box through;
+ * every other assertion here goes through real HTTP calls to /api/admin/*.
+ */
+async function runAdminScenarios() {
+  console.log("\n=== Admin scenarios ===");
+  const suffix = Date.now().toString().slice(-8);
+
+  const adminEmail = `e2e-admin-${suffix}@trylo.test`;
+  const adminPassword = "E2eAdmin123!";
+  await db.admin.create({ data: { email: adminEmail, passwordHash: hashPassword(adminPassword), name: "E2E Admin" } });
+
+  const adminLogin = await api<{ token: string }>("/api/admin/auth/login", {
+    method: "POST",
+    body: { email: adminEmail, password: adminPassword },
+  });
+  assert(adminLogin.status === 200 && !!adminLogin.data.token, "admin logs in with email + password");
+  const adminToken = adminLogin.data.token;
+
+  // ---- Role-boundary enforcement ----
+  const custPhone = `9${suffix}8`;
+  const custOtpReq = await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", {
+    method: "POST",
+    body: { phone: custPhone },
+  });
+  const custVerify = await api<{ token: string; user: { id: string } }>("/api/customer/auth/otp/verify", {
+    method: "POST",
+    body: { phone: custPhone, otp: custOtpReq.data.devHintOtp },
+  });
+  const customerToken = custVerify.data.token;
+  const custId = custVerify.data.user.id;
+  await api("/api/customer/auth/profile", { method: "POST", token: customerToken, body: { name: "Admin Test Rider" } });
+
+  const { token: bystanderDriverToken } = await createUnverifiedDriver(`9${suffix}9`, "Bystander Driver");
+  capturedAdminScenarioDriverToken = bystanderDriverToken;
+
+  const customerOnAdmin = await api("/api/admin/dashboard", { token: customerToken });
+  assert(customerOnAdmin.status === 401, "a customer token is rejected on an admin route (401)");
+
+  const driverOnAdmin = await api("/api/admin/dashboard", { token: bystanderDriverToken });
+  assert(driverOnAdmin.status === 401, "a driver token is rejected on an admin route (401)");
+
+  const noTokenOnAdmin = await api("/api/admin/dashboard");
+  assert(noTokenOnAdmin.status === 401, "an unauthenticated request is rejected on an admin route (401)");
+
+  const adminOnCustomerRoute = await api("/api/customer/auth/me", { token: adminToken });
+  assert(adminOnCustomerRoute.status === 401, "an admin token is rejected on a customer route (401)");
+
+  // ---- Dashboard stats ----
+  const dashboard = await api<{
+    totalCustomers: number;
+    totalDrivers: number;
+    pendingDriverApprovals: number;
+    failedPayments: number;
+  }>("/api/admin/dashboard", { token: adminToken });
+  assert(dashboard.status === 200, "admin can load the dashboard");
+  assert(
+    dashboard.data.totalCustomers > 0 && dashboard.data.totalDrivers > 0,
+    "dashboard totals reflect real seeded customers and drivers"
+  );
+
+  // ---- Driver approve / reject ----
+  const { token: pendingApproveToken, driverId: approveDriverId } = await createUnverifiedDriver(`9${suffix}1`, "Approve Me Driver");
+  const { driverId: rejectDriverId } = await createUnverifiedDriver(`9${suffix}2`, "Reject Me Driver");
+
+  const beforeApproval = await api<{ verificationStatus: string }>(`/api/admin/drivers/${approveDriverId}`, { token: adminToken });
+  assert(beforeApproval.data.verificationStatus === "pending", "a freshly onboarded driver is genuinely still 'pending'");
+
+  const pendingList = await api<{ drivers: Array<{ id: string }>; total: number }>("/api/admin/drivers", {
+    token: adminToken,
+    query: { verificationStatus: "pending" },
+  });
+  assert(
+    pendingList.data.drivers.some((d) => d.id === approveDriverId),
+    "the pending driver appears in the admin's pending-approvals list"
+  );
+
+  const approved = await api<{ verificationStatus: string }>(`/api/admin/drivers/${approveDriverId}/approve`, {
+    method: "POST",
+    token: adminToken,
+  });
+  assert(approved.data.verificationStatus === "verified", "admin approves a pending driver -> verified");
+
+  // The approved driver can now actually go online, proving this isn't just a display flag.
+  const approvedGoesOnline = await api<{ isOnline: boolean }>("/api/driver/status", {
+    method: "POST",
+    token: pendingApproveToken,
+    body: { isOnline: true },
+  });
+  assert(approvedGoesOnline.data.isOnline === true, "the newly-approved driver can go online");
+  await api("/api/driver/status", { method: "POST", token: pendingApproveToken, body: { isOnline: false } });
+
+  const rejected = await api<{ verificationStatus: string }>(`/api/admin/drivers/${rejectDriverId}/reject`, {
+    method: "POST",
+    token: adminToken,
+    body: { reason: "Documents unclear" },
+  });
+  assert(rejected.data.verificationStatus === "rejected", "admin rejects a pending driver -> rejected");
+
+  // ---- Customer suspend / unsuspend actually blocks platform usage ----
+  const suspendCustomer = await api<{ suspended: boolean }>(`/api/admin/customers/${custId}/suspend`, {
+    method: "POST",
+    token: adminToken,
+    body: { reason: "e2e test" },
+  });
+  assert(suspendCustomer.data.suspended === true, "admin suspends a customer");
+
+  const pickup = { address: "Admin Test Pickup", point: { lat: 12.9716, lng: 77.5946 } };
+  const drop = { address: "Admin Test Drop", point: { lat: 12.99, lng: 77.61 } };
+  const fares = await api<Array<{ vehicleType: string; fare: Record<string, number> }>>("/api/customer/fares/estimates", {
+    token: customerToken,
+    query: { pickupLat: pickup.point.lat, pickupLng: pickup.point.lng, dropLat: drop.point.lat, dropLng: drop.point.lng },
+  });
+  const bikeFare = fares.data.find((f) => f.vehicleType === "bike")!;
+  const blockedRide = await api("/api/customer/rides", {
+    method: "POST",
+    token: customerToken,
+    body: { pickup, drop, vehicleType: "bike", fare: bikeFare.fare },
+  });
+  assert(blockedRide.status === 403, "a suspended customer cannot create a ride (403)");
+
+  const suspendedLoginAttempt = await api<{ success: boolean; reason?: string }>("/api/customer/auth/otp/verify", {
+    method: "POST",
+    body: {
+      phone: custPhone,
+      otp: (await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", { method: "POST", body: { phone: custPhone } })).data
+        .devHintOtp,
+    },
+  });
+  assert(
+    suspendedLoginAttempt.data.success === false && suspendedLoginAttempt.data.reason === "suspended",
+    "a suspended customer cannot log in (gets reason: 'suspended')"
+  );
+
+  const unsuspendCustomer = await api<{ suspended: boolean }>(`/api/admin/customers/${custId}/unsuspend`, {
+    method: "POST",
+    token: adminToken,
+  });
+  assert(unsuspendCustomer.data.suspended === false, "admin unsuspends the customer");
+
+  const rideAfterUnsuspend = await api<{ id: string; status: string }>("/api/customer/rides", {
+    method: "POST",
+    token: customerToken,
+    body: { pickup, drop, vehicleType: "bike", fare: bikeFare.fare },
+  });
+  assert(rideAfterUnsuspend.status === 200, "the unsuspended customer can create a ride again");
+  await api(`/api/customer/rides/${rideAfterUnsuspend.data.id}/cancel`, {
+    method: "POST",
+    token: customerToken,
+    body: { reason: "e2e cleanup" },
+  });
+
+  // ---- Driver suspend / unsuspend actually blocks going online ----
+  const { token: driverToken, driverId } = await onboardVerifiedOnlineDriver(`9${suffix}3`, "Suspend Me Driver");
+  await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
+
+  const suspendDriver = await api<{ suspended: boolean }>(`/api/admin/drivers/${driverId}/suspend`, {
+    method: "POST",
+    token: adminToken,
+    body: { reason: "e2e test" },
+  });
+  assert(suspendDriver.data.suspended === true, "admin suspends a driver");
+
+  const blockedOnline = await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: true } });
+  assert(blockedOnline.status === 403, "a suspended driver cannot go online (403)");
+
+  const unsuspendDriver = await api<{ suspended: boolean }>(`/api/admin/drivers/${driverId}/unsuspend`, {
+    method: "POST",
+    token: adminToken,
+  });
+  assert(unsuspendDriver.data.suspended === false, "admin unsuspends the driver");
+
+  const allowedOnline = await api<{ isOnline: boolean }>("/api/driver/status", {
+    method: "POST",
+    token: driverToken,
+    body: { isOnline: true },
+  });
+  assert(allowedOnline.data.isOnline === true, "the unsuspended driver can go online again");
+  await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
+
+  // ---- Ride + payment list filtering ----
+  const ridesByCustomer = await api<{ rides: Array<{ riderId: string }>; total: number }>("/api/admin/rides", {
+    token: adminToken,
+    query: { customerId: custId },
+  });
+  assert(
+    ridesByCustomer.data.total > 0 && ridesByCustomer.data.rides.every((r) => r.riderId === custId),
+    "admin ride list filters correctly by customerId"
+  );
+
+  const failedPaymentRides = await api<{ rides: Array<{ paymentStatus: string }> }>("/api/admin/rides", {
+    token: adminToken,
+    query: { paymentStatus: "failed" },
+  });
+  assert(
+    failedPaymentRides.data.rides.every((r) => r.paymentStatus === "failed"),
+    "admin ride list filters correctly by paymentStatus"
+  );
+
+  const walletTxns = await api<{ transactions: unknown[] }>("/api/admin/payments/wallet-transactions", { token: adminToken });
+  assert(walletTxns.status === 200, "admin can list wallet transactions");
+
+  const driverEarningsList = await api<{ earnings: unknown[] }>("/api/admin/payments/driver-earnings", { token: adminToken });
+  assert(driverEarningsList.status === 200, "admin can list driver earnings");
+
+  const ridesTrend = await api<{ trend: unknown[] }>("/api/admin/analytics/rides-trend", { token: adminToken, query: { period: "daily" } });
+  assert(ridesTrend.status === 200, "admin can load the rides analytics trend");
+}
+
 async function run() {
   const suffix = Date.now().toString().slice(-8);
   const customerPhone = `9${suffix}1`;
@@ -854,6 +1099,7 @@ async function run() {
 
   await runCancellationScenarios();
   await runPaymentScenarios();
+  await runAdminScenarios();
 }
 
 run()
@@ -885,6 +1131,14 @@ run()
         body: { isOnline: false },
       }).catch(() => {});
     }
+    if (capturedAdminScenarioDriverToken) {
+      await api("/api/driver/status", {
+        method: "POST",
+        token: capturedAdminScenarioDriverToken,
+        body: { isOnline: false },
+      }).catch(() => {});
+    }
+    await db.$disconnect().catch(() => {});
     console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
     process.exit(failures === 0 ? 0 : 1);
   });

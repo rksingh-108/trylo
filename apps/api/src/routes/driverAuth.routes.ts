@@ -57,6 +57,11 @@ router.post("/otp/verify", async (req, res) => {
     });
   }
 
+  if (driver.suspended) {
+    res.json({ success: false, isNewDriver: false, driver: null, reason: "suspended" });
+    return;
+  }
+
   const token = signToken({ sub: driver.id, role: "driver" });
   const refreshToken = await issueRefreshToken(driver.id, "driver", req.headers["user-agent"]);
   res.json({ success: true, isNewDriver, driver: serializeDriver(driver), token, refreshToken });

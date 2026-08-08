@@ -14,6 +14,7 @@ export * from "./components/switch";
 export * from "./components/tabs";
 export * from "./components/otp-input";
 export * from "./components/toast";
+export * from "./components/table";
 
 export * from "./kinetic/fare-badge";
 export * from "./kinetic/rating-stars";

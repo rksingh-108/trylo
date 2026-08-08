@@ -1,0 +1,28 @@
+@import "@trylo/design-tokens/css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Admin app primary = Slate Indigo (distinct from customer amber / driver teal) */
+  --primary: 231 48% 40%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 231 48% 40%;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-background text-foreground font-body antialiased;
+}
+
+::selection {
+  @apply bg-primary/25;
+}
+
+* {
+  @apply border-border;
+}

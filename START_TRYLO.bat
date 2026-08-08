@@ -48,7 +48,7 @@ if errorlevel 1 (
 :: ---------------------------------------------------------------
 :: 1. Docker Desktop / Docker Engine
 :: ---------------------------------------------------------------
-echo [1/6] Checking Docker Engine...
+echo [1/7] Checking Docker Engine...
 
 :: NOTE: a bare "docker info" can hang for a long time (60s+) when the
 :: daemon is completely unreachable, instead of failing fast. :docker_check_fast
@@ -113,7 +113,7 @@ echo.
 :: ---------------------------------------------------------------
 :: 2. PostgreSQL container
 :: ---------------------------------------------------------------
-echo [2/6] Starting PostgreSQL container...
+echo [2/7] Starting PostgreSQL container...
 docker ps --filter "name=trylo-postgres" --filter "status=running" --format "{{.Names}}" 2>nul | findstr /i "trylo-postgres" >nul
 if not errorlevel 1 (
     echo       PostgreSQL container is already running.
@@ -147,7 +147,7 @@ echo.
 :: ---------------------------------------------------------------
 :: 3. API server (port 4000)
 :: ---------------------------------------------------------------
-echo [3/6] Starting API server...
+echo [3/7] Starting API server...
 call :port_in_use 4000
 if "!PORT_BUSY!"=="1" (
     echo       API server already running on port 4000.
@@ -160,7 +160,7 @@ echo.
 :: ---------------------------------------------------------------
 :: 4. Customer app (port 3000)
 :: ---------------------------------------------------------------
-echo [4/6] Starting Customer app...
+echo [4/7] Starting Customer app...
 call :port_in_use 3000
 if "!PORT_BUSY!"=="1" (
     echo       Customer app already running on port 3000.
@@ -173,7 +173,7 @@ echo.
 :: ---------------------------------------------------------------
 :: 5. Driver app (port 3001)
 :: ---------------------------------------------------------------
-echo [5/6] Starting Driver app...
+echo [5/7] Starting Driver app...
 call :port_in_use 3001
 if "!PORT_BUSY!"=="1" (
     echo       Driver app already running on port 3001.
@@ -184,18 +184,34 @@ if "!PORT_BUSY!"=="1" (
 echo.
 
 :: ---------------------------------------------------------------
-:: 6. Wait for health, then open browsers
+:: 6. Admin app (port 3002)
 :: ---------------------------------------------------------------
-echo [6/6] Waiting for services to become healthy...
+echo [6/7] Starting Admin app...
+call :port_in_use 3002
+if "!PORT_BUSY!"=="1" (
+    echo       Admin app already running on port 3002.
+) else (
+    start "TRYLO Admin - port 3002" cmd /k "cd /d "%PROJECT_ROOT%" && pnpm dev:admin"
+    echo       Admin app launching in a new window...
+)
+echo.
+
+:: ---------------------------------------------------------------
+:: 7. Wait for health, then open browsers
+:: ---------------------------------------------------------------
+echo [7/7] Waiting for services to become healthy...
 call :wait_for_http "http://localhost:4000/health" "API server"
 call :wait_for_http "http://localhost:3000" "Customer app"
 call :wait_for_http "http://localhost:3001" "Driver app"
+call :wait_for_http "http://localhost:3002" "Admin app"
 echo.
 
 echo Opening browser windows...
 start "" "http://localhost:3000"
 ping -n 2 127.0.0.1 >nul
 start "" "http://localhost:3001"
+ping -n 2 127.0.0.1 >nul
+start "" "http://localhost:3002"
 echo.
 
 echo ============================================
@@ -203,6 +219,7 @@ echo   TRYLO is up and running!
 echo ============================================
 echo   Customer app:   http://localhost:3000
 echo   Driver app:     http://localhost:3001
+echo   Admin app:      http://localhost:3002
 echo   API server:     http://localhost:4000
 echo   API health:     http://localhost:4000/health
 echo   PostgreSQL:     localhost:55432  (container: trylo-postgres)

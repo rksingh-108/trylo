@@ -22,3 +22,13 @@ export const otpLimiter = rateLimit({
   keyGenerator: (req) => `${req.ip}:${typeof req.body?.phone === "string" ? req.body.phone : ""}`,
   message: { error: "Too many attempts. Please try again later." },
 });
+
+/** Admin login is password-based (no OTP), so it gets its own brute-force backstop. */
+export const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `${req.ip}:${typeof req.body?.email === "string" ? req.body.email : ""}`,
+  message: { error: "Too many attempts. Please try again later." },
+});

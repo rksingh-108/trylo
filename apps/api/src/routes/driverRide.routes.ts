@@ -19,6 +19,13 @@ router.post("/status", requireAuth("driver"), async (req, res) => {
     res.status(400).json({ error: "Invalid status" });
     return;
   }
+  if (parsed.data.isOnline) {
+    const driver = await db.driver.findUnique({ where: { id: req.auth!.id } });
+    if (driver?.suspended) {
+      res.status(403).json({ error: "Your account has been suspended. Contact support." });
+      return;
+    }
+  }
   const data: Prisma.DriverUpdateInput = {
     isOnline: parsed.data.isOnline,
     onlineSince: parsed.data.isOnline ? new Date() : null,
@@ -108,6 +115,12 @@ router.get("/requests/incoming", requireAuth("driver"), async (req, res) => {
 });
 
 router.post("/requests/:rideId/accept", requireAuth("driver"), async (req, res) => {
+  const driver = await db.driver.findUnique({ where: { id: req.auth!.id } });
+  if (driver?.suspended) {
+    res.status(403).json({ error: "Your account has been suspended. Contact support." });
+    return;
+  }
+
   const ride = await db.ride.findFirst({
     where: { id: req.params.rideId, driverId: req.auth!.id, status: "requested" },
   });

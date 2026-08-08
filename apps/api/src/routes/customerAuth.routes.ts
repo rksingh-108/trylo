@@ -42,6 +42,11 @@ router.post("/otp/verify", async (req, res) => {
     user = await db.user.create({ data: { phone } });
   }
 
+  if (user.suspended) {
+    res.json({ success: false, isNewUser: false, user: null, reason: "suspended" });
+    return;
+  }
+
   const token = signToken({ sub: user.id, role: "customer" });
   const refreshToken = await issueRefreshToken(user.id, "customer", req.headers["user-agent"]);
   res.json({

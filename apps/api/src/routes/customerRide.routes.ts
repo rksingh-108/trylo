@@ -41,6 +41,12 @@ router.post("/", requireAuth("customer"), async (req, res) => {
   }
   const { pickup, drop, vehicleType, fare } = parsed.data;
 
+  const rider = await db.user.findUnique({ where: { id: req.auth!.id } });
+  if (rider?.suspended) {
+    res.status(403).json({ error: "Your account has been suspended. Contact support." });
+    return;
+  }
+
   const existingActive = await db.ride.findFirst({
     where: { riderId: req.auth!.id, status: { in: [...ACTIVE_STATUSES] } },
   });

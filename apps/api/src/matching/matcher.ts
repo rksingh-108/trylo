@@ -96,6 +96,7 @@ async function offerUnassignedRides() {
       where: {
         isOnline: true,
         verificationStatus: "verified",
+        suspended: false,
         vehicleType: ride.vehicleType,
         id: { notIn: [...busyDriverIds, ...ride.excludedDriverIds] },
       },

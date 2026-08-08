@@ -16,6 +16,7 @@ export interface VerifyOtpResult {
   success: boolean;
   isNewUser: boolean;
   user: User | null;
+  reason?: "suspended";
 }
 
 export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResult> {

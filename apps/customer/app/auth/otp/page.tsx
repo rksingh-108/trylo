@@ -56,9 +56,10 @@ function OtpForm() {
     setError(null);
     const result = await verifyOtp.mutateAsync({ phone, otp: code });
     if (!result.success) {
-      setError("Incorrect code. Try again.");
+      const message = result.reason === "suspended" ? "Your account has been suspended." : "Incorrect code. Try again.";
+      setError(message);
       setShakeTrigger((n) => n + 1);
-      toast.error("Incorrect code. Try again.");
+      toast.error(message);
       return;
     }
     toast.success("Verified!");

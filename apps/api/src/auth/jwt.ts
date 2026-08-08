@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { env } from "../env";
 
-export type Role = "customer" | "driver";
+export type Role = "customer" | "driver" | "admin";
 
 export interface TokenPayload {
   sub: string;
