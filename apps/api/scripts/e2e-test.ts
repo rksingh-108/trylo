@@ -89,6 +89,7 @@ let capturedDriverToken: string | null = null;
 let capturedCancelDriverToken: string | null = null;
 let capturedPaymentDriverToken: string | null = null;
 let capturedAdminScenarioDriverToken: string | null = null;
+let capturedGeoDriverIds: string[] = [];
 
 async function onboardVerifiedOnlineDriver(phone: string, name: string): Promise<{ token: string; driverId: string }> {
   const otpReq = await api<{ devHintOtp: string }>("/api/driver/auth/otp/request", {
@@ -792,6 +793,112 @@ async function runAdminScenarios() {
   assert(ridesTrend.status === 200, "admin can load the rides analytics trend");
 }
 
+/**
+ * Exercises the geo-index candidate-discovery change in matcher.ts directly:
+ * seeds four online/verified drivers at exact, known distances/staleness
+ * relative to a fixed pickup point and asserts the ride is offered to
+ * exactly the one driver that is both in-radius (CANDIDATE_RADIUS_METERS)
+ * and has a fresh location (LOCATION_STALE_MS) - never to the far, stale, or
+ * never-reported-location driver, even though all four are otherwise
+ * identically online/verified/non-suspended/matching-vehicle-type.
+ *
+ * These four drivers are seeded via a direct DB write rather than the real
+ * signup/KYC/OTP HTTP flow other scenarios use: this scenario tests
+ * matcher.ts's candidate SQL query, not driver onboarding (already covered
+ * extensively elsewhere in this file), and the exact geometry/staleness
+ * needed here - a driver 20km away, one whose location is 60s stale, one
+ * that's never reported a location at all - can't be produced through the
+ * public API anyway (POST /driver/location always stamps
+ * locationUpdatedAt = now()). This mirrors the same justified-direct-write
+ * pattern runAdminScenarios() already uses for fixtures the public API has
+ * no endpoint to create. It also sidesteps a real problem this scenario hit
+ * during development: 4 full onboarding flows (~40 requests each: OTP, KYC
+ * uploads, polling) appended after the rest of this already-large suite was
+ * enough additional volume to trip the app's global rate limiter (300
+ * req/60s, see app.ts) partway through the 3rd driver's onboarding - a
+ * test-request-volume problem unrelated to the feature under test. A direct
+ * DB write avoids that without touching the limiter (production behavior)
+ * at all.
+ */
+async function runGeoIndexScenarios() {
+  console.log("\n=== Geo-index scenarios ===");
+  const suffix = Date.now().toString().slice(-8);
+
+  const customerPhone = `9${suffix}5`;
+  const custOtpReq = await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", {
+    method: "POST",
+    body: { phone: customerPhone },
+  });
+  const custVerify = await api<{ token: string }>("/api/customer/auth/otp/verify", {
+    method: "POST",
+    body: { phone: customerPhone, otp: custOtpReq.data.devHintOtp },
+  });
+  const customerToken = custVerify.data.token;
+
+  // Fixed reference point (matches the CITY_CENTER used to jitter-seed new
+  // drivers elsewhere in this file), so the offsets below are known distances.
+  const pickup = { lat: 12.9716, lng: 77.5946 };
+
+  async function seedDriver(phone: string, name: string, lat: number, locationUpdatedAt: Date | null) {
+    return db.driver.create({
+      data: {
+        phone,
+        name,
+        vehicleType: "bike",
+        verificationStatus: "verified",
+        isOnline: true,
+        onlineSince: new Date(),
+        lat,
+        lng: pickup.lng,
+        locationUpdatedAt,
+      },
+    });
+  }
+
+  // ~2km from pickup (0.018deg lat ~= 2km) - inside the 15km radius, fresh location.
+  const near = await seedDriver(`9${suffix}6`, "Geo Near Driver", pickup.lat + 0.018, new Date());
+  // ~20km from pickup (0.18deg lat ~= 20km) - outside the 15km radius, fresh location.
+  const far = await seedDriver(`9${suffix}7`, "Geo Far Driver", pickup.lat + 0.18, new Date());
+  // Same ~2km distance as "near", but locationUpdatedAt is 60s old - past the 45s staleness window.
+  const stale = await seedDriver(`9${suffix}8`, "Geo Stale Driver", pickup.lat + 0.018, new Date(Date.now() - 60_000));
+  // Same ~2km distance, but locationUpdatedAt is NULL (never reported a location) - must also be excluded.
+  const noLocation = await seedDriver(`9${suffix}9`, "Geo NoLocation Driver", pickup.lat + 0.018, null);
+  capturedGeoDriverIds = [near.id, far.id, stale.id, noLocation.id];
+
+  const rideRes = await api<{ id: string; status: string }>("/api/customer/rides", {
+    method: "POST",
+    token: customerToken,
+    body: {
+      pickup: { address: "Geo Test Pickup", point: pickup },
+      drop: { address: "Geo Test Drop", point: { lat: pickup.lat + 0.05, lng: pickup.lng + 0.05 } },
+      vehicleType: "bike",
+      fare: { base: 15, distance: 10, time: 5, surge: 0, promoDiscount: 0, total: 30, currency: "INR" },
+    },
+  });
+  assert(rideRes.status === 200 && rideRes.data.status === "requested", "geo-test ride created");
+  const rideId = rideRes.data.id;
+
+  const matched = await waitFor(
+    async () => {
+      const status = await api<{ driverId: string | null }>(`/api/customer/rides/${rideId}/status`, {
+        token: customerToken,
+      });
+      return status.data?.driverId ? status.data : null;
+    },
+    "matching loop assigns a driver to the geo-test ride",
+    8000
+  );
+  assert(
+    matched.driverId === near.id,
+    "only the in-radius, fresh-location driver is offered the ride (far/stale/no-location drivers excluded)",
+    `expected ${near.id}, got ${matched.driverId}`
+  );
+
+  // Clean up so these drivers don't linger as candidates for anything that runs after this.
+  await api(`/api/customer/rides/${rideId}/cancel`, { method: "POST", token: customerToken });
+  await db.driver.updateMany({ where: { id: { in: capturedGeoDriverIds } }, data: { isOnline: false } });
+}
+
 async function run() {
   const suffix = Date.now().toString().slice(-8);
   const customerPhone = `9${suffix}1`;
@@ -1100,6 +1207,7 @@ async function run() {
   await runCancellationScenarios();
   await runPaymentScenarios();
   await runAdminScenarios();
+  await runGeoIndexScenarios();
 }
 
 run()
@@ -1137,6 +1245,11 @@ run()
         token: capturedAdminScenarioDriverToken,
         body: { isOnline: false },
       }).catch(() => {});
+    }
+    if (capturedGeoDriverIds.length > 0) {
+      await db.driver
+        .updateMany({ where: { id: { in: capturedGeoDriverIds } }, data: { isOnline: false } })
+        .catch(() => {});
     }
     await db.$disconnect().catch(() => {});
     console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);

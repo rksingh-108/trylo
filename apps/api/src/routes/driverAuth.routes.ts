@@ -50,7 +50,7 @@ router.post("/otp/verify", async (req, res) => {
   if (!driver) {
     const location = jitter(CITY_CENTER, 3);
     driver = await db.driver.create({
-      data: { phone, lat: location.lat, lng: location.lng },
+      data: { phone, lat: location.lat, lng: location.lng, locationUpdatedAt: new Date() },
     });
     await db.kycDocument.createMany({
       data: KYC_DOC_DEFS.map((d) => ({ driverId: driver!.id, type: d.type, label: d.label })),

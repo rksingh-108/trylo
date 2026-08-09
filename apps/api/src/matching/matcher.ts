@@ -1,3 +1,4 @@
+import { VehicleType } from "@prisma/client";
 import { db } from "../db";
 import { haversineKm } from "../lib/geo";
 import { serializeRide } from "../lib/serialize";
@@ -12,6 +13,61 @@ const TICK_MS = 1_000;
 const MAX_MATCH_ATTEMPTS = 8;
 
 const ACTIVE_DRIVER_STATUSES = ["requested", "arriving", "arrived", "in_progress"] as const;
+
+// Candidate-discovery tuning (performance-only knobs - they bound what gets
+// fetched from the DB before scoreCandidate() runs; they must never be tight
+// enough to change *who* would have been matched before this change, since
+// the previous behavior had no radius/staleness cutoff at all.
+const CANDIDATE_RADIUS_METERS = 15_000;
+const LOCATION_STALE_MS = 45_000;
+const MAX_CANDIDATES = 25;
+
+interface DriverCandidate {
+  id: string;
+  lat: number;
+  lng: number;
+  rating: number;
+  offeredCount: number;
+  acceptedCount: number;
+  onlineSince: Date | null;
+  lastRideEndedAt: Date | null;
+}
+
+/**
+ * Fetches online/verified/non-suspended/matching-vehicle-type drivers within
+ * CANDIDATE_RADIUS_METERS of pickup, with a location fresher than
+ * LOCATION_STALE_MS, nearest-first, capped at MAX_CANDIDATES. Replaces what
+ * used to be an unfiltered `db.driver.findMany` (every online driver
+ * regardless of distance) with an index-backed query: earth_box(...) @> geo
+ * is the earthdistance idiom that actually uses the GiST index on
+ * Driver.geo (a bare earth_distance() comparison alone is not indexable),
+ * and the composite (isOnline, verificationStatus, suspended, vehicleType)
+ * index backs the rest of the WHERE clause. Everything downstream
+ * (scoreCandidate, the final pick, offer/accept/timeout/exclusion behavior)
+ * is unchanged - only how this candidate set is fetched changed.
+ */
+async function findNearbyCandidates(
+  pickup: { lat: number; lng: number },
+  vehicleType: VehicleType,
+  excludeIds: string[]
+): Promise<DriverCandidate[]> {
+  const excluded = excludeIds.length > 0 ? excludeIds : [""];
+  return db.$queryRaw<DriverCandidate[]>`
+    SELECT id, lat, lng, rating, "offeredCount", "acceptedCount", "onlineSince", "lastRideEndedAt"
+    FROM "Driver"
+    WHERE "isOnline" = true
+      AND "verificationStatus" = 'verified'
+      AND suspended = false
+      AND "vehicleType" = ${vehicleType}::"VehicleType"
+      AND NOT (id = ANY(${excluded}::text[]))
+      AND "locationUpdatedAt" IS NOT NULL
+      AND "locationUpdatedAt" > now() - (${LOCATION_STALE_MS}::text || ' milliseconds')::interval
+      AND earth_box(ll_to_earth(${pickup.lat}, ${pickup.lng}), ${CANDIDATE_RADIUS_METERS}) @> geo
+      AND earth_distance(ll_to_earth(${pickup.lat}, ${pickup.lng}), geo) <= ${CANDIDATE_RADIUS_METERS}
+    ORDER BY earth_distance(ll_to_earth(${pickup.lat}, ${pickup.lng}), geo) ASC
+    LIMIT ${MAX_CANDIDATES}
+  `;
+}
 
 async function expireStaleOffers() {
   const stale = await db.ride.findMany({
@@ -92,18 +148,13 @@ async function offerUnassignedRides() {
       continue;
     }
 
-    const candidates = await db.driver.findMany({
-      where: {
-        isOnline: true,
-        verificationStatus: "verified",
-        suspended: false,
-        vehicleType: ride.vehicleType,
-        id: { notIn: [...busyDriverIds, ...ride.excludedDriverIds] },
-      },
-    });
+    const pickup = { lat: ride.pickupLat, lng: ride.pickupLng };
+    const candidates = await findNearbyCandidates(pickup, ride.vehicleType, [
+      ...busyDriverIds,
+      ...ride.excludedDriverIds,
+    ]);
     if (candidates.length === 0) continue;
 
-    const pickup = { lat: ride.pickupLat, lng: ride.pickupLng };
     const maxDistanceKm = Math.max(...candidates.map((d) => haversineKm(d, pickup)), 1);
     const best = candidates.reduce((top, driver) => {
       const score = scoreCandidate(driver, pickup, maxDistanceKm);

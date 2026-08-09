@@ -44,7 +44,7 @@ router.post("/location", requireAuth("driver"), async (req, res) => {
   }
   const driver = await db.driver.update({
     where: { id: req.auth!.id },
-    data: { lat: parsed.data.lat, lng: parsed.data.lng },
+    data: { lat: parsed.data.lat, lng: parsed.data.lng, locationUpdatedAt: new Date() },
   });
 
   const activeRide = await db.ride.findFirst({

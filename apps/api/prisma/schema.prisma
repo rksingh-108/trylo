@@ -131,6 +131,25 @@ model Driver {
   lng                 Float
   createdAt           DateTime                  @default(now())
 
+  /// Set whenever lat/lng is written (signup seed, or POST /driver/location).
+  /// Used by the matching engine to exclude drivers whose location has gone
+  /// stale (no ping within LOCATION_STALE_MS) from candidate discovery.
+  locationUpdatedAt DateTime?
+
+  /// Generated from lat/lng by Postgres (see migration) via the earthdistance
+  /// extension's ll_to_earth(); GiST-indexed for radius/nearest-neighbor
+  /// queries. Never read or written directly through Prisma - lat/lng remain
+  /// the source of truth, this column is maintained by Postgres automatically.
+  ///
+  /// CAUTION: Prisma cannot express GENERATED ALWAYS AS or the GiST index on
+  /// an Unsupported field, so `prisma migrate dev` will perpetually see this
+  /// column/index as drift and offer to "fix" it with a migration that drops
+  /// the GiST index and un-generates the column - do NOT accept that
+  /// migration. Use `prisma migrate dev --create-only` for future schema
+  /// changes and manually strip any DROP INDEX "Driver_geo_idx" / ALTER
+  /// COLUMN "geo" DROP DEFAULT lines from the generated SQL before applying.
+  geo Unsupported("earth")?
+
   // Matching-engine signals: acceptance rate and idle time, alongside distance and rating.
   offeredCount    Int       @default(0)
   acceptedCount   Int       @default(0)
@@ -140,6 +159,8 @@ model Driver {
   rides         Ride[]
   payouts       PayoutRecord[]
   earnings      DriverEarning[]
+
+  @@index([isOnline, verificationStatus, suspended, vehicleType])
 }
 
 model KycDocument {
