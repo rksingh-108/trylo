@@ -793,38 +793,52 @@ async function runAdminScenarios() {
   assert(ridesTrend.status === 200, "admin can load the rides analytics trend");
 }
 
+// Fixed reference point (matches the CITY_CENTER used to jitter-seed new
+// drivers elsewhere in this file), so the km offsets below are known distances.
+const GEO_PICKUP = { lat: 12.9716, lng: 77.5946 };
+const GEO_KM_TO_DEG_LAT = 1 / 111.32;
+
+function geoOffsetLat(km: number): number {
+  return GEO_PICKUP.lat + km * GEO_KM_TO_DEG_LAT;
+}
+
 /**
- * Exercises the geo-index candidate-discovery change in matcher.ts directly:
- * seeds four online/verified drivers at exact, known distances/staleness
- * relative to a fixed pickup point and asserts the ride is offered to
- * exactly the one driver that is both in-radius (CANDIDATE_RADIUS_METERS)
- * and has a fresh location (LOCATION_STALE_MS) - never to the far, stale, or
- * never-reported-location driver, even though all four are otherwise
- * identically online/verified/non-suspended/matching-vehicle-type.
+ * Exercises matcher.ts's progressive 1km -> 2km -> 3km candidate-discovery
+ * search directly: each case seeds one or two online/verified drivers at
+ * exact, known distances/staleness/eligibility relative to a fixed pickup
+ * point and asserts exactly which driver (if any) the matching loop offers
+ * the ride to. Covers: a tier-1 hit, a tier-2 fallback (tier 1 genuinely
+ * empty), a tier-3 fallback (tiers 1-2 genuinely empty), a driver beyond 3km
+ * that must never be matched, staleness/offline/suspended/unverified
+ * exclusion, that the existing weighted score (distance/rating/acceptance/
+ * idle) still picks correctly among same-tier candidates, and - the
+ * behavior that most distinguishes "progressive" from "just search 3km" -
+ * that a mediocre tier-1 candidate is matched over an objectively
+ * better-scoring tier-3 candidate, because tier 2/3 are never even queried
+ * once tier 1 returns a non-empty result.
  *
- * These four drivers are seeded via a direct DB write rather than the real
- * signup/KYC/OTP HTTP flow other scenarios use: this scenario tests
- * matcher.ts's candidate SQL query, not driver onboarding (already covered
- * extensively elsewhere in this file), and the exact geometry/staleness
- * needed here - a driver 20km away, one whose location is 60s stale, one
- * that's never reported a location at all - can't be produced through the
- * public API anyway (POST /driver/location always stamps
- * locationUpdatedAt = now()). This mirrors the same justified-direct-write
- * pattern runAdminScenarios() already uses for fixtures the public API has
- * no endpoint to create. It also sidesteps a real problem this scenario hit
- * during development: 4 full onboarding flows (~40 requests each: OTP, KYC
- * uploads, polling) appended after the rest of this already-large suite was
- * enough additional volume to trip the app's global rate limiter (300
- * req/60s, see app.ts) partway through the 3rd driver's onboarding - a
- * test-request-volume problem unrelated to the feature under test. A direct
- * DB write avoids that without touching the limiter (production behavior)
- * at all.
+ * Drivers are seeded via a direct DB write rather than the real
+ * signup/KYC/OTP HTTP flow other scenarios use: this exercises the
+ * candidate SQL query, not driver onboarding (already covered extensively
+ * elsewhere in this file), and the exact geometry/staleness/eligibility
+ * needed per case can't be produced through the public API anyway (e.g.
+ * POST /driver/location always stamps locationUpdatedAt = now()). This
+ * mirrors the same justified-direct-write pattern runAdminScenarios()
+ * already uses, and also keeps request volume low - going through full
+ * onboarding for every case previously tripped the app's global rate
+ * limiter (300 req/60s, see app.ts), a test-request-volume problem
+ * unrelated to the feature under test.
  */
 async function runGeoIndexScenarios() {
-  console.log("\n=== Geo-index scenarios ===");
+  console.log("\n=== Geo-index scenarios (progressive 1km -> 2km -> 3km) ===");
   const suffix = Date.now().toString().slice(-8);
+  let driverCounter = 0;
+  function nextPhone(): string {
+    driverCounter += 1;
+    return `9${suffix}${driverCounter}`;
+  }
 
-  const customerPhone = `9${suffix}5`;
+  const customerPhone = `8${suffix}0`;
   const custOtpReq = await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", {
     method: "POST",
     body: { phone: customerPhone },
@@ -835,68 +849,219 @@ async function runGeoIndexScenarios() {
   });
   const customerToken = custVerify.data.token;
 
-  // Fixed reference point (matches the CITY_CENTER used to jitter-seed new
-  // drivers elsewhere in this file), so the offsets below are known distances.
-  const pickup = { lat: 12.9716, lng: 77.5946 };
-
-  async function seedDriver(phone: string, name: string, lat: number, locationUpdatedAt: Date | null) {
-    return db.driver.create({
+  async function seedGeoDriver(opts: {
+    name: string;
+    offsetKm: number;
+    isOnline?: boolean;
+    verificationStatus?: "pending" | "verified" | "rejected";
+    suspended?: boolean;
+    locationUpdatedAt?: Date | null;
+    rating?: number;
+    offeredCount?: number;
+    acceptedCount?: number;
+  }) {
+    const driver = await db.driver.create({
       data: {
-        phone,
-        name,
+        phone: nextPhone(),
+        name: opts.name,
         vehicleType: "bike",
-        verificationStatus: "verified",
-        isOnline: true,
+        verificationStatus: opts.verificationStatus ?? "verified",
+        isOnline: opts.isOnline ?? true,
         onlineSince: new Date(),
-        lat,
-        lng: pickup.lng,
-        locationUpdatedAt,
+        suspended: opts.suspended ?? false,
+        lat: geoOffsetLat(opts.offsetKm),
+        lng: GEO_PICKUP.lng,
+        locationUpdatedAt: opts.locationUpdatedAt === undefined ? new Date() : opts.locationUpdatedAt,
+        rating: opts.rating ?? 5,
+        offeredCount: opts.offeredCount ?? 0,
+        acceptedCount: opts.acceptedCount ?? 0,
       },
     });
+    capturedGeoDriverIds.push(driver.id);
+    return driver;
   }
 
-  // ~2km from pickup (0.018deg lat ~= 2km) - inside the 15km radius, fresh location.
-  const near = await seedDriver(`9${suffix}6`, "Geo Near Driver", pickup.lat + 0.018, new Date());
-  // ~20km from pickup (0.18deg lat ~= 20km) - outside the 15km radius, fresh location.
-  const far = await seedDriver(`9${suffix}7`, "Geo Far Driver", pickup.lat + 0.18, new Date());
-  // Same ~2km distance as "near", but locationUpdatedAt is 60s old - past the 45s staleness window.
-  const stale = await seedDriver(`9${suffix}8`, "Geo Stale Driver", pickup.lat + 0.018, new Date(Date.now() - 60_000));
-  // Same ~2km distance, but locationUpdatedAt is NULL (never reported a location) - must also be excluded.
-  const noLocation = await seedDriver(`9${suffix}9`, "Geo NoLocation Driver", pickup.lat + 0.018, null);
-  capturedGeoDriverIds = [near.id, far.id, stale.id, noLocation.id];
+  async function createGeoRide(): Promise<string> {
+    const rideRes = await api<{ id: string; status: string }>("/api/customer/rides", {
+      method: "POST",
+      token: customerToken,
+      body: {
+        pickup: { address: "Geo Test Pickup", point: GEO_PICKUP },
+        drop: { address: "Geo Test Drop", point: { lat: GEO_PICKUP.lat + 0.05, lng: GEO_PICKUP.lng + 0.05 } },
+        vehicleType: "bike",
+        fare: { base: 15, distance: 10, time: 5, surge: 0, promoDiscount: 0, total: 30, currency: "INR" },
+      },
+    });
+    assert(rideRes.status === 200 && rideRes.data.status === "requested", "geo-test ride created");
+    return rideRes.data.id;
+  }
 
-  const rideRes = await api<{ id: string; status: string }>("/api/customer/rides", {
-    method: "POST",
-    token: customerToken,
-    body: {
-      pickup: { address: "Geo Test Pickup", point: pickup },
-      drop: { address: "Geo Test Drop", point: { lat: pickup.lat + 0.05, lng: pickup.lng + 0.05 } },
-      vehicleType: "bike",
-      fare: { base: 15, distance: 10, time: 5, surge: 0, promoDiscount: 0, total: 30, currency: "INR" },
-    },
-  });
-  assert(rideRes.status === 200 && rideRes.data.status === "requested", "geo-test ride created");
-  const rideId = rideRes.data.id;
-
-  const matched = await waitFor(
-    async () => {
+  /**
+   * Polls up to timeoutMs for a driverId to appear; returns null if it never
+   * does. Polls at TICK_MS (the matching loop's own cadence) rather than
+   * faster - polling in between ticks can't observe a match any sooner, and
+   * this scenario's 8 cases already generate a lot of requests, so
+   * over-polling risks tripping the app's global rate limiter (300 req/60s,
+   * see app.ts) the same way un-throttled onboarding flows did previously.
+   */
+  async function pollDriverId(rideId: string, timeoutMs: number): Promise<string | null> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
       const status = await api<{ driverId: string | null }>(`/api/customer/rides/${rideId}/status`, {
         token: customerToken,
       });
-      return status.data?.driverId ? status.data : null;
-    },
-    "matching loop assigns a driver to the geo-test ride",
-    8000
-  );
-  assert(
-    matched.driverId === near.id,
-    "only the in-radius, fresh-location driver is offered the ride (far/stale/no-location drivers excluded)",
-    `expected ${near.id}, got ${matched.driverId}`
-  );
+      if (status.data?.driverId) return status.data.driverId;
+      await sleep(1000);
+    }
+    return null;
+  }
 
-  // Clean up so these drivers don't linger as candidates for anything that runs after this.
-  await api(`/api/customer/rides/${rideId}/cancel`, { method: "POST", token: customerToken });
-  await db.driver.updateMany({ where: { id: { in: capturedGeoDriverIds } }, data: { isOnline: false } });
+  async function finishCase(rideId: string, driverIds: string[]) {
+    await api(`/api/customer/rides/${rideId}/cancel`, { method: "POST", token: customerToken }).catch(() => {});
+    if (driverIds.length > 0) {
+      await db.driver.updateMany({ where: { id: { in: driverIds } }, data: { isOnline: false } });
+    }
+  }
+
+  // ---- Case: driver within 1km (tier 1) is matched ----
+  {
+    const d = await seedGeoDriver({ name: "Geo Tier1 Driver", offsetKm: 0.6 });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 8000);
+    assert(matched === d.id, "driver within 1km (tier 1) is matched", `expected ${d.id}, got ${matched}`);
+    await finishCase(rideId, [d.id]);
+  }
+
+  // ---- Case: no driver within 1km, driver within 2km (tier 2) is matched ----
+  {
+    const d = await seedGeoDriver({ name: "Geo Tier2 Driver", offsetKm: 1.5 });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 8000);
+    assert(
+      matched === d.id,
+      "no driver within 1km: search widens to 2km and matches the tier-2 driver",
+      `expected ${d.id}, got ${matched}`
+    );
+    await finishCase(rideId, [d.id]);
+  }
+
+  // ---- Case: no driver within 2km, driver within 3km (tier 3) is matched ----
+  {
+    const d = await seedGeoDriver({ name: "Geo Tier3 Driver", offsetKm: 2.5 });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 8000);
+    assert(
+      matched === d.id,
+      "no driver within 2km: search widens to 3km and matches the tier-3 driver",
+      `expected ${d.id}, got ${matched}`
+    );
+    await finishCase(rideId, [d.id]);
+  }
+
+  // ---- Case: driver beyond 3km is never matched - search never widens past the last tier ----
+  {
+    const d = await seedGeoDriver({ name: "Geo Beyond3km Driver", offsetKm: 4 });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 3000);
+    assert(matched === null, "driver beyond 3km is never matched", `expected null, got ${matched}`);
+    await finishCase(rideId, [d.id]);
+  }
+
+  // ---- Case: stale location (>45s) excludes an otherwise-eligible tier-1 driver ----
+  {
+    const d = await seedGeoDriver({
+      name: "Geo Stale Driver",
+      offsetKm: 0.5,
+      locationUpdatedAt: new Date(Date.now() - 60_000),
+    });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 3000);
+    assert(matched === null, "stale-location driver is excluded even within 1km", `expected null, got ${matched}`);
+    await finishCase(rideId, [d.id]);
+  }
+
+  // ---- Case: offline driver is excluded ----
+  {
+    const d = await seedGeoDriver({ name: "Geo Offline Driver", offsetKm: 0.5, isOnline: false });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 3000);
+    assert(matched === null, "offline driver is excluded even within 1km", `expected null, got ${matched}`);
+    await finishCase(rideId, [d.id]);
+  }
+
+  // ---- Case: suspended / unverified drivers are excluded ----
+  {
+    const suspended = await seedGeoDriver({ name: "Geo Suspended Driver", offsetKm: 0.5, suspended: true });
+    const unverified = await seedGeoDriver({ name: "Geo Unverified Driver", offsetKm: 0.5, verificationStatus: "pending" });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 3000);
+    assert(
+      matched === null,
+      "suspended and unverified drivers are excluded even within 1km",
+      `expected null, got ${matched}`
+    );
+    await finishCase(rideId, [suspended.id, unverified.id]);
+  }
+
+  // ---- Case: existing weighted scoring still applies among same-tier candidates ----
+  {
+    // Both within 1km (tier 1): a closer but much worse-rated/lower-acceptance
+    // driver vs. a slightly farther 5-star driver with a perfect acceptance
+    // history. scoreCandidate weights distance 50% / rating 20% / acceptance
+    // 20% / idle 10%, so the meaningfully-better driver should still win
+    // despite being marginally farther - proving the pre-existing scoring
+    // logic (untouched by this change) still runs correctly.
+    const closerWorse = await seedGeoDriver({
+      name: "Geo Closer Worse",
+      offsetKm: 0.2,
+      rating: 1,
+      offeredCount: 10,
+      acceptedCount: 0,
+    });
+    const fartherBetter = await seedGeoDriver({
+      name: "Geo Farther Better",
+      offsetKm: 0.95,
+      rating: 5,
+      offeredCount: 10,
+      acceptedCount: 10,
+    });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 8000);
+    assert(
+      matched === fartherBetter.id,
+      "existing weighted scoring (rating/acceptance) still picks the better driver over the merely-closer one within the same tier",
+      `expected ${fartherBetter.id}, got ${matched}`
+    );
+    await finishCase(rideId, [closerWorse.id, fartherBetter.id]);
+  }
+
+  // ---- Case: progressive search stops at the first non-empty tier, even if a
+  // higher-scoring driver exists farther out - the key behavior that
+  // distinguishes "progressive 1->2->3km" from "just search a flat 3km". ----
+  {
+    const tier1Mediocre = await seedGeoDriver({
+      name: "Geo Progressive Tier1",
+      offsetKm: 0.5,
+      rating: 3,
+      offeredCount: 10,
+      acceptedCount: 1,
+    });
+    const tier3Excellent = await seedGeoDriver({
+      name: "Geo Progressive Tier3",
+      offsetKm: 2.5,
+      rating: 5,
+      offeredCount: 10,
+      acceptedCount: 10,
+    });
+    const rideId = await createGeoRide();
+    const matched = await pollDriverId(rideId, 8000);
+    assert(
+      matched === tier1Mediocre.id,
+      "progressive search stops at tier 1 and never considers the tier-3 driver, even though it would score higher",
+      `expected ${tier1Mediocre.id}, got ${matched}`
+    );
+    await finishCase(rideId, [tier1Mediocre.id, tier3Excellent.id]);
+  }
 }
 
 async function run() {
