@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
+    "dev:https": "next dev --port 3000 --experimental-https --experimental-https-key ../../certs/lan-key.pem --experimental-https-cert ../../certs/lan-cert.pem",
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "next lint",

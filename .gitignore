@@ -18,6 +18,10 @@ build/
 .env.local
 .env.*.local
 
+# LAN test certificates (self-signed, generated locally for the private
+# LAN test - regenerated per machine/IP, never committed)
+certs/
+
 # misc
 .DS_Store
 *.pem
