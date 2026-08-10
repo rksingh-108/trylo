@@ -42,6 +42,13 @@ export function LocationSearchSheet({
   title = "Plan your ride",
   children,
 }: LocationSearchSheetProps) {
+  // Tracks which of the two fields is currently focused, so only that one's
+  // dropdown is allowed to render - otherwise a field's leftover suggestions
+  // from an earlier search stay mounted after the user moves to the other
+  // field without picking one, and (being absolutely positioned right below
+  // the input) visually overlap and intercept clicks meant for it.
+  const [activeField, setActiveField] = React.useState<"pickup" | "drop" | null>(null);
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent>
@@ -62,6 +69,9 @@ export function LocationSearchSheet({
               onSelect={onPickupSelect}
               placeholder="Pickup location"
               autoFocus={autoFocus === "pickup"}
+              open={activeField === "pickup"}
+              onFocus={() => setActiveField("pickup")}
+              onBlur={() => setActiveField((field) => (field === "pickup" ? null : field))}
             />
             <PlaceAutocomplete
               value={dropValue}
@@ -69,6 +79,9 @@ export function LocationSearchSheet({
               onSelect={onDropSelect}
               placeholder="Where to?"
               autoFocus={autoFocus === "drop"}
+              open={activeField === "drop"}
+              onFocus={() => setActiveField("drop")}
+              onBlur={() => setActiveField((field) => (field === "drop" ? null : field))}
             />
           </div>
         </div>

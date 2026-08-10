@@ -58,10 +58,31 @@ export interface PlaceAutocompleteProps {
   placeholder?: string;
   autoFocus?: boolean;
   className?: string;
+  /**
+   * Whether this field's dropdown is allowed to render. Callers that show
+   * more than one PlaceAutocomplete at once (e.g. Pickup + Destination in
+   * LocationSearchSheet) must track which field is currently active and
+   * pass `open` accordingly, so a field's stale suggestions from an earlier
+   * search don't stay mounted - and visually overlapping the other field -
+   * after the user has moved on without picking one.
+   */
+  open: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }
 
 /** Location search box backed by Photon (photon.komoot.io) — free, no API key, OpenStreetMap-based. */
-export function PlaceAutocomplete({ value, onChange, onSelect, placeholder, autoFocus, className }: PlaceAutocompleteProps) {
+export function PlaceAutocomplete({
+  value,
+  onChange,
+  onSelect,
+  placeholder,
+  autoFocus,
+  className,
+  open,
+  onFocus,
+  onBlur,
+}: PlaceAutocompleteProps) {
   const [results, setResults] = React.useState<PlaceResult[]>([]);
   const requestId = React.useRef(0);
 
@@ -92,16 +113,23 @@ export function PlaceAutocomplete({ value, onChange, onSelect, placeholder, auto
             value={value}
             autoFocus={autoFocus}
             onChange={(e) => onChange(e.target.value)}
+            onFocus={onFocus}
+            onBlur={onBlur}
             placeholder={placeholder ?? "Search destination"}
             className="pl-11"
           />
         </div>
-        {results.length > 0 && (
+        {open && results.length > 0 && (
           <div className="absolute inset-x-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-border bg-card shadow-elevation-3 animate-in fade-in slide-in-from-top-1">
             {results.map((place) => (
               <button
                 key={place.placeId}
                 type="button"
+                // Prevent the input from blurring on click - a mousedown-triggered
+                // blur would flip `open` to false (via onBlur) before this button's
+                // click handler runs, closing the dropdown out from under the click
+                // and silently dropping the selection.
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleSelect(place)}
                 className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent"
               >
