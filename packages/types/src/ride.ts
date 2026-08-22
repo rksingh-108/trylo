@@ -82,3 +82,17 @@ export interface PromoCode {
   discountPercent: number;
   maxDiscount: number;
 }
+
+export interface RideMessage {
+  id: string;
+  rideId: string;
+  senderRole: "customer" | "driver";
+  body: string;
+  createdAt: string;
+}
+
+/** Response from triggering an in-app SOS alert - see the customer/driver SOS routes. Not a real emergency-service integration. */
+export interface SosAlertResult {
+  id: string;
+  createdAt: string;
+}

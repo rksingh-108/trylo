@@ -6,3 +6,4 @@ export * from "./address";
 export * from "./wallet";
 export * from "./earnings";
 export * from "./admin";
+export * from "./notification";

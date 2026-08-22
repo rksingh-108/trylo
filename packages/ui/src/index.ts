@@ -29,6 +29,8 @@ export * from "./kinetic/empty-state";
 export * from "./kinetic/page-transition";
 export * from "./kinetic/waiting-timer";
 export * from "./kinetic/cancel-ride-sheet";
+export * from "./kinetic/ride-chat-sheet";
+export * from "./kinetic/sos-confirm-sheet";
 
 export * from "./theme/theme-provider";
 export * from "./theme/theme-toggle";

@@ -63,3 +63,23 @@ export function onDriverLocation<T = unknown>(handler: (location: T) => void): (
   s.on("driver:location", handler);
   return () => s.off("driver:location", handler);
 }
+
+/** Sends an in-ride chat message. Delivered live via `ride:message:new` to everyone in the `ride:{rideId}` room (see apps/api/src/realtime/io.ts). */
+export function sendRideMessage(rideId: string, body: string) {
+  getSocket()?.emit("ride:message", { rideId, body });
+}
+
+export function onRideMessage<T = unknown>(handler: (message: T) => void): () => void {
+  const s = getSocket();
+  if (!s) return () => {};
+  s.on("ride:message:new", handler);
+  return () => s.off("ride:message:new", handler);
+}
+
+/** A notification pushed live to whichever side it's addressed to - filter by `forRole` before acting on it, since both the rider's and driver's sockets share the same ride room. */
+export function onNotification<T = unknown>(handler: (notification: T & { forRole: "customer" | "driver" }) => void): () => void {
+  const s = getSocket();
+  if (!s) return () => {};
+  s.on("notification:new", handler);
+  return () => s.off("notification:new", handler);
+}

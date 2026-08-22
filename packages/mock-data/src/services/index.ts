@@ -3,6 +3,8 @@ export * from "./address.service";
 export * from "./fare.service";
 export * from "./driverDiscovery.service";
 export * from "./ride.service";
+export * from "./notification.service";
+export * from "./driverNotification.service";
 export * from "./wallet.service";
 export * from "./history.service";
 export * from "./paymentMethod.service";

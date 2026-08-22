@@ -66,6 +66,7 @@ enum WalletTxnCategory {
   refund
   payout
   bonus
+  cancellation_fee
 }
 
 enum PayoutStatus {
@@ -106,30 +107,30 @@ model User {
   suspended     Boolean  @default(false)
   createdAt     DateTime @default(now())
 
-  rides            Ride[]
-  savedPlaces      SavedPlace[]
-  paymentMethods   PaymentMethod[]
-  walletTxns       WalletTransaction[]
+  rides          Ride[]
+  savedPlaces    SavedPlace[]
+  paymentMethods PaymentMethod[]
+  walletTxns     WalletTransaction[]
 }
 
 model Driver {
-  id                  String                    @id @default(cuid())
-  phone               String                    @unique
-  name                String                    @default("")
-  rating              Float                     @default(5)
-  totalRides          Int                       @default(0)
-  vehicleType         VehicleType               @default(bike)
-  make                String                    @default("")
-  model               String                    @default("")
-  registrationNumber  String                    @default("")
-  color               String                    @default("")
-  verificationStatus  DriverVerificationStatus  @default(pending)
-  isOnline            Boolean                   @default(false)
-  onlineSince         DateTime?
-  suspended           Boolean                   @default(false)
-  lat                 Float
-  lng                 Float
-  createdAt           DateTime                  @default(now())
+  id                 String                   @id @default(cuid())
+  phone              String                   @unique
+  name               String                   @default("")
+  rating             Float                    @default(5)
+  totalRides         Int                      @default(0)
+  vehicleType        VehicleType              @default(bike)
+  make               String                   @default("")
+  model              String                   @default("")
+  registrationNumber String                   @default("")
+  color              String                   @default("")
+  verificationStatus DriverVerificationStatus @default(pending)
+  isOnline           Boolean                  @default(false)
+  onlineSince        DateTime?
+  suspended          Boolean                  @default(false)
+  lat                Float
+  lng                Float
+  createdAt          DateTime                 @default(now())
 
   /// Set whenever lat/lng is written (signup seed, or POST /driver/location).
   /// Used by the matching engine to exclude drivers whose location has gone
@@ -155,21 +156,21 @@ model Driver {
   acceptedCount   Int       @default(0)
   lastRideEndedAt DateTime?
 
-  kycDocuments  KycDocument[]
-  rides         Ride[]
-  payouts       PayoutRecord[]
-  earnings      DriverEarning[]
+  kycDocuments KycDocument[]
+  rides        Ride[]
+  payouts      PayoutRecord[]
+  earnings     DriverEarning[]
 
   @@index([isOnline, verificationStatus, suspended, vehicleType])
 }
 
 model KycDocument {
-  id         String    @id @default(cuid())
+  id         String     @id @default(cuid())
   driverId   String
-  driver     Driver    @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  driver     Driver     @relation(fields: [driverId], references: [id], onDelete: Cascade)
   type       KycDocType
   label      String
-  status     KycStatus @default(not_uploaded)
+  status     KycStatus  @default(not_uploaded)
   fileName   String?
   uploadedAt DateTime?
 
@@ -177,8 +178,8 @@ model KycDocument {
 }
 
 model Ride {
-  id        String      @id @default(cuid())
-  status    RideStatus  @default(requested)
+  id     String     @id @default(cuid())
+  status RideStatus @default(requested)
 
   vehicleType   VehicleType
   pickupAddress String
@@ -198,22 +199,22 @@ model Ride {
   fareBase          Int
   fareDistance      Int
   fareTime          Int
-  fareSurge         Int      @default(0)
-  farePromoDiscount Int      @default(0)
+  fareSurge         Int @default(0)
+  farePromoDiscount Int @default(0)
   fareTotal         Int
 
-  distanceKm Float
+  distanceKm  Float
   durationMin Int
 
-  requestedAt     DateTime  @default(now())
-  offerExpiresAt  DateTime?
-  excludedDriverIds String[] @default([])
+  requestedAt       DateTime  @default(now())
+  offerExpiresAt    DateTime?
+  excludedDriverIds String[]  @default([])
 
-  acceptedAt  DateTime?
-  arrivedAt   DateTime?
-  startedAt   DateTime?
-  completedAt DateTime?
-  cancelledAt DateTime?
+  acceptedAt   DateTime?
+  arrivedAt    DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  cancelledAt  DateTime?
   cancelReason String?
   cancelledBy  OwnerRole?
 
@@ -228,10 +229,48 @@ model Ride {
   statusHistory      RideStatusHistory[]
   walletTransactions WalletTransaction[]
   driverEarning      DriverEarning?
+  messages           RideMessage[]
+  sosAlerts          SosAlert[]
 
   @@index([riderId])
   @@index([driverId])
   @@index([status])
+}
+
+/// In-ride chat between the rider and the assigned driver. Deliberately minimal -
+/// plain text only, no attachments/read-receipts. senderRole is constrained to
+/// "customer" | "driver" in application code (reuses OwnerRole since it already
+/// has both variants - "admin" is never written here).
+model RideMessage {
+  id         String    @id @default(cuid())
+  rideId     String
+  ride       Ride      @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  senderRole OwnerRole
+  body       String
+  createdAt  DateTime  @default(now())
+
+  @@index([rideId, createdAt])
+}
+
+/// An in-app emergency alert raised by the rider or driver during an active ride.
+/// This is NOT integrated with any real emergency-service/dispatch API - it only
+/// records the event and notifies TRYLO admins (see lib/notify.ts). riderId/driverId
+/// are denormalized from the ride at alert time so an alert stays queryable even if
+/// the ride reference is ever removed.
+model SosAlert {
+  id          String    @id @default(cuid())
+  rideId      String
+  ride        Ride      @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  triggeredBy OwnerRole
+  riderId     String
+  driverId    String?
+  lat         Float?
+  lng         Float?
+  note        String?
+  createdAt   DateTime  @default(now())
+
+  @@index([rideId])
+  @@index([createdAt])
 }
 
 model RideStatusHistory {
@@ -304,14 +343,14 @@ model DriverEarning {
 }
 
 model PayoutRecord {
-  id                 String       @id @default(cuid())
-  driverId           String
-  driver             Driver       @relation(fields: [driverId], references: [id], onDelete: Cascade)
-  amount             Int
-  status             PayoutStatus @default(processed)
-  bankAccountLast4   String
-  initiatedAt        DateTime     @default(now())
-  processedAt        DateTime?
+  id               String       @id @default(cuid())
+  driverId         String
+  driver           Driver       @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  amount           Int
+  status           PayoutStatus @default(processed)
+  bankAccountLast4 String
+  initiatedAt      DateTime     @default(now())
+  processedAt      DateTime?
 
   @@index([driverId])
 }
@@ -382,14 +421,14 @@ model Admin {
 /// reference into whichever table targetType names (no formal FK, since a
 /// single relation can't point at two different target tables).
 model AdminActionLog {
-  id         String             @id @default(cuid())
+  id         String            @id @default(cuid())
   adminId    String
-  admin      Admin              @relation(fields: [adminId], references: [id])
+  admin      Admin             @relation(fields: [adminId], references: [id])
   action     String
   targetType AdminActionTarget
   targetId   String
   note       String?
-  createdAt  DateTime           @default(now())
+  createdAt  DateTime          @default(now())
 
   @@index([targetType, targetId])
   @@index([adminId])

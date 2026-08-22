@@ -1,4 +1,4 @@
-import type { FareBreakdown, Ride, RideLocation, VehicleType } from "@trylo/types";
+import type { FareBreakdown, Ride, RideLocation, RideMessage, SosAlertResult, VehicleType } from "@trylo/types";
 import { apiClient } from "../apiClient";
 
 export interface CreateRideInput {
@@ -34,4 +34,19 @@ export async function rateRide(rideId: string, rating: number, tip = 0): Promise
 
 export async function getActiveRide(): Promise<Ride | null> {
   return apiClient.get<Ride | null>("/api/customer/rides/active");
+}
+
+export async function getRideMessages(rideId: string): Promise<RideMessage[]> {
+  return apiClient.get<RideMessage[]>(`/api/customer/rides/${rideId}/messages`);
+}
+
+export interface TriggerSosInput {
+  lat?: number;
+  lng?: number;
+  note?: string;
+}
+
+/** In-app emergency alert only - see apps/api/src/routes/customerRide.routes.ts for what this actually does (and doesn't) do. */
+export async function triggerSos(rideId: string, input: TriggerSosInput = {}): Promise<SosAlertResult> {
+  return apiClient.post<SosAlertResult>(`/api/customer/rides/${rideId}/sos`, input);
 }

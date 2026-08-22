@@ -15,17 +15,24 @@ import {
   PageTransition,
   PremiumMap,
   RatingStars,
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
+  RideChatSheet,
   Skeleton,
+  SosConfirmSheet,
   StatusPill,
   toast,
   WaitingTimer,
   type RouteInfo,
 } from "@trylo/ui";
-import { useActiveRide, useCancelRide, useDriverLiveLocation, useRideStatus } from "@trylo/mock-data/hooks";
+import { getRideMessages } from "@trylo/mock-data";
+import {
+  useActiveRide,
+  useCancelRide,
+  useDriverLiveLocation,
+  useLiveNotifications,
+  useRideChat,
+  useRideStatus,
+  useTriggerSos,
+} from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
 
 function initials(name: string) {
@@ -84,10 +91,17 @@ export default function LiveRidePage() {
   const { data: ride } = useRideStatus(activeRideId);
   const liveDriverLocation = useDriverLiveLocation(activeRideId);
   const cancelRide = useCancelRide();
+  const triggerSos = useTriggerSos();
+  const { messages: chatMessages, send: sendChatMessage } = useRideChat(activeRideId, getRideMessages);
   const [sosOpen, setSosOpen] = React.useState(false);
+  const [chatOpen, setChatOpen] = React.useState(false);
   const [cancelSheetOpen, setCancelSheetOpen] = React.useState(false);
   const [routeInfo, setRouteInfo] = React.useState<RouteInfo | null>(null);
   const cancelHandledRef = React.useRef(false);
+
+  useLiveNotifications(activeRideId, "customer", (notification) => {
+    toast.info(notification.title, { description: notification.body });
+  });
 
   React.useEffect(() => {
     if (activeRideId) return;
@@ -131,6 +145,13 @@ export default function LiveRidePage() {
     if (!activeRideId) return;
     await cancelRide.mutateAsync({ rideId: activeRideId, reason });
     setCancelSheetOpen(false);
+  }
+
+  async function handleSosConfirm() {
+    if (!activeRideId) return;
+    await triggerSos.mutateAsync({ rideId: activeRideId });
+    setSosOpen(false);
+    toast.success("Emergency alert sent to TRYLO support");
   }
 
   return (
@@ -209,7 +230,13 @@ export default function LiveRidePage() {
                 <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Call driver">
                   <Phone size={15} />
                 </Button>
-                <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Message driver">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  aria-label="Message driver"
+                  onClick={() => setChatOpen(true)}
+                >
                   <MessageCircle size={15} />
                 </Button>
               </div>
@@ -289,27 +316,21 @@ export default function LiveRidePage() {
         </motion.div>
       </PageTransition>
 
-      <Sheet open={sosOpen} onOpenChange={setSosOpen}>
-        <SheetContent>
-          <SheetHeader className="items-center text-center">
-            <span className="mx-auto mb-2 grid h-12 w-12 place-items-center rounded-full bg-destructive/15">
-              <AlertTriangle size={22} className="text-destructive" />
-            </span>
-            <SheetTitle>Emergency assistance</SheetTitle>
-            <p className="text-sm text-muted-foreground">
-              We&apos;ll share your live location and trip details with your emergency contacts and local authorities.
-            </p>
-          </SheetHeader>
-          <div className="flex flex-col gap-2">
-            <Button variant="destructive" size="lg" onClick={() => setSosOpen(false)}>
-              Alert emergency contacts
-            </Button>
-            <Button variant="outline" size="lg" onClick={() => setSosOpen(false)}>
-              Cancel
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
+      <SosConfirmSheet
+        open={sosOpen}
+        onOpenChange={setSosOpen}
+        onConfirm={handleSosConfirm}
+        isPending={triggerSos.isPending}
+      />
+
+      <RideChatSheet
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        messages={chatMessages}
+        currentRole="customer"
+        otherPartyLabel={driver?.name ?? "Driver"}
+        onSend={sendChatMessage}
+      />
 
       <CancelRideSheet
         open={cancelSheetOpen}

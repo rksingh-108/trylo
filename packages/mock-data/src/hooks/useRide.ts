@@ -109,6 +109,14 @@ export function useCompleteRide() {
   });
 }
 
+/** In-app emergency alert only - see rideService.triggerSos for what this actually does (and doesn't) do. */
+export function useTriggerSos() {
+  return useMutation({
+    mutationFn: ({ rideId, ...input }: { rideId: string } & rideService.TriggerSosInput) =>
+      rideService.triggerSos(rideId, input),
+  });
+}
+
 export function useRateRide() {
   const queryClient = useQueryClient();
   return useMutation({

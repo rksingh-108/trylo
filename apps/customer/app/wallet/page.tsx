@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Ban,
   Car,
   Gift,
   Plus,
@@ -38,6 +39,7 @@ const CATEGORY_ICONS: Record<WalletTransaction["category"], React.ComponentType<
   refund: RotateCcw,
   payout: ArrowUpFromLine,
   bonus: Gift,
+  cancellation_fee: Ban,
 };
 
 function formatRelative(iso: string) {

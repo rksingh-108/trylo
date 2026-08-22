@@ -6,7 +6,7 @@ import { requireAuth } from "../auth/middleware";
 const router = Router();
 
 const walletTxnListSchema = z.object({
-  category: z.enum(["ride", "top_up", "refund", "payout", "bonus"]).optional(),
+  category: z.enum(["ride", "top_up", "refund", "payout", "bonus", "cancellation_fee"]).optional(),
   type: z.enum(["credit", "debit"]).optional(),
   userId: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),

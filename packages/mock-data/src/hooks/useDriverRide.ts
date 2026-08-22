@@ -130,6 +130,14 @@ export function useCancelDriverRide() {
   });
 }
 
+/** In-app emergency alert only - see driverRideService.triggerDriverSos for what this actually does (and doesn't) do. */
+export function useTriggerDriverSos() {
+  return useMutation({
+    mutationFn: ({ rideId, ...input }: { rideId: string } & driverRideService.TriggerDriverSosInput) =>
+      driverRideService.triggerDriverSos(rideId, input),
+  });
+}
+
 export function useDriverRideHistory() {
   return useQuery({
     queryKey: queryKeys.driverRideHistory,

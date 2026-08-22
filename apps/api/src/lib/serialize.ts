@@ -1,10 +1,12 @@
 import type {
   Driver as PrismaDriver,
   KycDocument as PrismaKycDocument,
+  Notification as PrismaNotification,
   Ride as PrismaRide,
+  RideMessage as PrismaRideMessage,
   User as PrismaUser,
 } from "@prisma/client";
-import type { Driver, KycDocument, Ride } from "@trylo/types";
+import type { AppNotification, Driver, KycDocument, Ride, RideMessage } from "@trylo/types";
 import { haversineKm } from "./geo";
 
 export function serializeDriver(driver: PrismaDriver): Driver {
@@ -88,5 +90,28 @@ export function serializeRide(ride: RideWithRelations): Ride {
     rating: ride.rating ?? undefined,
     tip: ride.tip ?? undefined,
     paymentStatus: ride.paymentStatus,
+  };
+}
+
+export function serializeRideMessage(message: PrismaRideMessage): RideMessage {
+  return {
+    id: message.id,
+    rideId: message.rideId,
+    // senderRole is only ever written as "customer" or "driver" by the socket
+    // chat handler (see realtime/io.ts) - "admin" exists on the shared
+    // OwnerRole enum only because other models reuse it.
+    senderRole: message.senderRole === "admin" ? "customer" : message.senderRole,
+    body: message.body,
+    createdAt: message.createdAt.toISOString(),
+  };
+}
+
+export function serializeNotification(notification: PrismaNotification): AppNotification {
+  return {
+    id: notification.id,
+    title: notification.title,
+    body: notification.body,
+    read: notification.read,
+    createdAt: notification.createdAt.toISOString(),
   };
 }

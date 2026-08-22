@@ -1,4 +1,4 @@
-import type { Driver, Ride } from "@trylo/types";
+import type { Driver, Ride, RideMessage, SosAlertResult } from "@trylo/types";
 import { apiClient } from "../apiClient";
 
 export interface IncomingRequestOffer {
@@ -40,4 +40,19 @@ export async function getDriverRideHistory(): Promise<Ride[]> {
 
 export async function updateDriverLocation(lat: number, lng: number): Promise<Driver> {
   return apiClient.post<Driver>("/api/driver/location", { lat, lng });
+}
+
+export async function getDriverRideMessages(rideId: string): Promise<RideMessage[]> {
+  return apiClient.get<RideMessage[]>(`/api/driver/rides/${rideId}/messages`);
+}
+
+export interface TriggerDriverSosInput {
+  lat?: number;
+  lng?: number;
+  note?: string;
+}
+
+/** In-app emergency alert only - see apps/api/src/routes/driverRide.routes.ts for what this actually does (and doesn't) do. */
+export async function triggerDriverSos(rideId: string, input: TriggerDriverSosInput = {}): Promise<SosAlertResult> {
+  return apiClient.post<SosAlertResult>(`/api/driver/rides/${rideId}/sos`, input);
 }

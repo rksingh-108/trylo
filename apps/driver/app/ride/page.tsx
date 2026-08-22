@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Clock3, MessageCircle, Navigation2, Phone, Route, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, MessageCircle, Navigation2, Phone, Route, ShieldCheck } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -16,17 +16,23 @@ import {
   OtpInput,
   PremiumMap,
   RatingStars,
+  RideChatSheet,
   Skeleton,
+  SosConfirmSheet,
   StatusPill,
   toast,
   WaitingTimer,
 } from "@trylo/ui";
 import type { RouteInfo } from "@trylo/ui";
+import { getDriverRideMessages } from "@trylo/mock-data";
 import {
   useActiveDriverRide,
   useCancelDriverRide,
   useEndRide,
+  useLiveNotifications,
   useReportLiveLocation,
+  useRideChat,
+  useTriggerDriverSos,
   useVerifyRiderOtp,
 } from "@trylo/mock-data/hooks";
 import type { Ride } from "@trylo/types";
@@ -72,13 +78,21 @@ export default function ActiveRidePage() {
   const endRide = useEndRide();
   const cancelDriverRide = useCancelDriverRide();
   const liveGpsLocation = useReportLiveLocation(Boolean(ride));
+  const triggerSos = useTriggerDriverSos();
+  const { messages: chatMessages, send: sendChatMessage } = useRideChat(ride?.id ?? null, getDriverRideMessages);
 
   const [otp, setOtp] = React.useState("");
   const [otpError, setOtpError] = React.useState<string | null>(null);
   const [completedRide, setCompletedRide] = React.useState<Ride | null>(null);
   const [routeInfo, setRouteInfo] = React.useState<RouteInfo | null>(null);
   const [cancelSheetOpen, setCancelSheetOpen] = React.useState(false);
+  const [chatOpen, setChatOpen] = React.useState(false);
+  const [sosOpen, setSosOpen] = React.useState(false);
   const cancelHandledRef = React.useRef(false);
+
+  useLiveNotifications(ride?.id ?? null, "driver", (notification) => {
+    toast.info(notification.title, { description: notification.body });
+  });
 
   React.useEffect(() => {
     if (!ride && !completedRide) {
@@ -113,6 +127,13 @@ export default function ActiveRidePage() {
     if (!ride) return;
     const result = await endRide.mutateAsync(ride.id);
     if (result) setCompletedRide(result);
+  }
+
+  async function handleSosConfirm() {
+    if (!ride) return;
+    await triggerSos.mutateAsync({ rideId: ride.id });
+    setSosOpen(false);
+    toast.success("Emergency alert sent to TRYLO support");
   }
 
   async function handleCancelConfirm(reason: string) {
@@ -169,7 +190,13 @@ export default function ActiveRidePage() {
                 <Button variant="secondary" size="icon" className="rounded-full" aria-label="Call rider">
                   <Phone size={16} />
                 </Button>
-                <Button variant="secondary" size="icon" className="rounded-full" aria-label="Message rider">
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="rounded-full"
+                  aria-label="Message rider"
+                  onClick={() => setChatOpen(true)}
+                >
                   <MessageCircle size={16} />
                 </Button>
               </div>
@@ -288,7 +315,28 @@ export default function ActiveRidePage() {
             </Button>
           </div>
         )}
+
+        <Button variant="destructive" size="lg" className="mt-4 w-full" onClick={() => setSosOpen(true)}>
+          <AlertTriangle size={18} />
+          SOS
+        </Button>
       </div>
+
+      <SosConfirmSheet
+        open={sosOpen}
+        onOpenChange={setSosOpen}
+        onConfirm={handleSosConfirm}
+        isPending={triggerSos.isPending}
+      />
+
+      <RideChatSheet
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        messages={chatMessages}
+        currentRole="driver"
+        otherPartyLabel={ride.rider?.name ?? "Rider"}
+        onSend={sendChatMessage}
+      />
 
       <CancelRideSheet
         open={cancelSheetOpen}

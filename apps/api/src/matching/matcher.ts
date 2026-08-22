@@ -4,6 +4,7 @@ import { haversineKm } from "../lib/geo";
 import { serializeRide } from "../lib/serialize";
 import { emitIncomingRequest, emitRequestCleared, emitRideUpdated } from "../realtime/io";
 import { recordRideStatus } from "../lib/rideHistory";
+import { notifyRideEvent } from "../lib/notify";
 
 const OFFER_WINDOW_MS = 15_000;
 const TICK_MS = 1_000;
@@ -145,6 +146,13 @@ async function cancelUndispatchableRide(rideId: string) {
   });
   await recordRideStatus(rideId, "cancelled", "no_drivers_available");
   emitRideUpdated(updated.id, serializeRide(updated));
+  await notifyRideEvent({
+    rideId: updated.id,
+    ownerId: updated.riderId,
+    ownerRole: "customer",
+    title: "No drivers available",
+    body: "We couldn't find a nearby driver. Please try again in a moment.",
+  });
 }
 
 async function offerUnassignedRides() {

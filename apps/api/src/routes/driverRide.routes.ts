@@ -3,15 +3,20 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { db } from "../db";
 import { requireAuth } from "../auth/middleware";
-import { serializeDriver, serializeRide } from "../lib/serialize";
+import { serializeDriver, serializeRide, serializeRideMessage } from "../lib/serialize";
 import { emitDriverLocation, emitRideUpdated } from "../realtime/io";
 import { recordRideStatus } from "../lib/rideHistory";
 import { haversineKm } from "../lib/geo";
+import { notifyRideEvent, notifyAllAdmins } from "../lib/notify";
 
 const router = Router();
 
 /** How close (in meters) the driver's GPS needs to be to the pickup point before we auto-mark arrival. */
 const ARRIVAL_RADIUS_METERS = 50;
+/** Ride statuses during which the driver can raise an SOS - mirrors the chat-availability window in realtime/io.ts. */
+const SOS_ACTIVE_STATUSES = ["arriving", "arrived", "in_progress"] as const;
+/** Don't create a fresh SosAlert (and re-notify admins) for a rapid accidental double-tap on the same ride. */
+const SOS_DEDUPE_WINDOW_MS = 2 * 60_000;
 
 router.post("/status", requireAuth("driver"), async (req, res) => {
   const parsed = z.object({ isOnline: z.boolean() }).safeParse(req.body);
@@ -65,6 +70,13 @@ router.post("/location", requireAuth("driver"), async (req, res) => {
         });
         await recordRideStatus(arrived.id, "arrived");
         emitRideUpdated(arrived.id, serializeRide(arrived));
+        await notifyRideEvent({
+          rideId: arrived.id,
+          ownerId: arrived.riderId,
+          ownerRole: "customer",
+          title: "Driver has arrived",
+          body: "Your driver is waiting at the pickup point.",
+        });
       }
     }
   }
@@ -136,6 +148,13 @@ router.post("/requests/:rideId/accept", requireAuth("driver"), async (req, res) 
   await db.driver.update({ where: { id: req.auth!.id }, data: { acceptedCount: { increment: 1 } } });
   await recordRideStatus(updated.id, "arriving");
   emitRideUpdated(updated.id, serializeRide(updated));
+  await notifyRideEvent({
+    rideId: updated.id,
+    ownerId: updated.riderId,
+    ownerRole: "customer",
+    title: "Driver assigned",
+    body: `${updated.driver?.name || "Your driver"} is on the way.`,
+  });
   res.json(serializeRide(updated));
 });
 
@@ -191,6 +210,13 @@ router.post("/rides/:rideId/cancel", requireAuth("driver"), async (req, res) => 
   await recordRideStatus(updated.id, "cancelled", updated.cancelReason ?? undefined);
 
   emitRideUpdated(updated.id, serializeRide(updated));
+  await notifyRideEvent({
+    rideId: updated.id,
+    ownerId: updated.riderId,
+    ownerRole: "customer",
+    title: "Ride cancelled",
+    body: `The driver cancelled this ride. ${updated.cancelReason ?? ""}`.trim(),
+  });
   res.json(serializeRide(updated));
 });
 
@@ -222,6 +248,13 @@ router.post("/rides/:rideId/verify-otp", requireAuth("driver"), async (req, res)
   });
   await recordRideStatus(updated.id, "in_progress");
   emitRideUpdated(updated.id, serializeRide(updated));
+  await notifyRideEvent({
+    rideId: updated.id,
+    ownerId: updated.riderId,
+    ownerRole: "customer",
+    title: "Trip started",
+    body: "Your ride is now in progress.",
+  });
   res.json({ success: true, ride: serializeRide(updated) });
 });
 
@@ -308,7 +341,106 @@ router.post("/rides/:rideId/end", requireAuth("driver"), async (req, res) => {
   }
 
   emitRideUpdated(finalRide.id, serializeRide(finalRide));
+
+  if (finalRide.paymentStatus === "paid") {
+    await notifyRideEvent({
+      rideId: finalRide.id,
+      ownerId: finalRide.riderId,
+      ownerRole: "customer",
+      title: "Ride completed",
+      body: `Your ride is complete. ₹${finalRide.fareTotal} was charged from your wallet.`,
+    });
+    await notifyRideEvent({
+      rideId: finalRide.id,
+      ownerId: req.auth!.id,
+      ownerRole: "driver",
+      title: "Ride completed",
+      body: `Trip complete. ₹${finalRide.fareTotal} was added to your earnings.`,
+    });
+  } else {
+    await notifyRideEvent({
+      rideId: finalRide.id,
+      ownerId: finalRide.riderId,
+      ownerRole: "customer",
+      title: "Ride completed",
+      body: "Your ride is complete, but payment failed due to insufficient wallet balance.",
+    });
+    await notifyRideEvent({
+      rideId: finalRide.id,
+      ownerId: req.auth!.id,
+      ownerRole: "driver",
+      title: "Ride completed",
+      body: "Trip complete, but the rider's payment failed (insufficient wallet balance).",
+    });
+  }
+
   res.json(serializeRide(finalRide));
+});
+
+router.get("/rides/:rideId/messages", requireAuth("driver"), async (req, res) => {
+  const ride = await db.ride.findFirst({ where: { id: req.params.rideId, driverId: req.auth!.id } });
+  if (!ride) {
+    res.json([]);
+    return;
+  }
+  const messages = await db.rideMessage.findMany({
+    where: { rideId: ride.id },
+    orderBy: { createdAt: "asc" },
+    take: 200,
+  });
+  res.json(messages.map(serializeRideMessage));
+});
+
+const sosSchema = z.object({
+  lat: z.number().optional(),
+  lng: z.number().optional(),
+  note: z.string().max(500).optional(),
+});
+
+// In-app emergency alert only - see the matching customer-side route for the
+// full rationale (no real emergency-service integration, admins only, no
+// auto-notify of the other ride participant).
+router.post("/rides/:rideId/sos", requireAuth("driver"), async (req, res) => {
+  const parsed = sosSchema.safeParse(req.body ?? {});
+  const ride = await db.ride.findFirst({ where: { id: req.params.rideId, driverId: req.auth!.id } });
+  if (!ride) {
+    res.status(404).json({ error: "Ride not found" });
+    return;
+  }
+  if (!SOS_ACTIVE_STATUSES.includes(ride.status as (typeof SOS_ACTIVE_STATUSES)[number])) {
+    res.status(409).json({ error: "SOS is only available during an active ride" });
+    return;
+  }
+
+  // Scoped to this ride AND this triggering role - see the matching comment in
+  // customerRide.routes.ts's SOS route for why (a customer's SOS on this ride
+  // must never suppress an independent driver SOS moments later, or vice versa).
+  const recent = await db.sosAlert.findFirst({
+    where: { rideId: ride.id, triggeredBy: "driver", createdAt: { gte: new Date(Date.now() - SOS_DEDUPE_WINDOW_MS) } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (recent) {
+    res.json({ id: recent.id, createdAt: recent.createdAt.toISOString() });
+    return;
+  }
+
+  const alert = await db.sosAlert.create({
+    data: {
+      rideId: ride.id,
+      triggeredBy: "driver",
+      riderId: ride.riderId,
+      driverId: ride.driverId,
+      lat: parsed.success ? parsed.data.lat : undefined,
+      lng: parsed.success ? parsed.data.lng : undefined,
+      note: parsed.success ? parsed.data.note : undefined,
+    },
+  });
+  await notifyAllAdmins(
+    "SOS: driver emergency alert",
+    `A driver triggered an in-app emergency alert on ride ${ride.id}.`
+  );
+
+  res.json({ id: alert.id, createdAt: alert.createdAt.toISOString() });
 });
 
 router.get("/rides/history", requireAuth("driver"), async (req, res) => {

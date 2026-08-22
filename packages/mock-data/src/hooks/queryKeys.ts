@@ -11,6 +11,8 @@ export const queryKeys = {
   rideDetail: (rideId: string) => ["rideDetail", rideId] as const,
   wallet: ["wallet"] as const,
   paymentMethods: ["paymentMethods"] as const,
+  notifications: ["notifications"] as const,
+  rideMessages: (rideId: string) => ["rideMessages", rideId] as const,
 
   currentDriver: ["currentDriver"] as const,
   kycDocuments: ["kycDocuments"] as const,
@@ -18,6 +20,7 @@ export const queryKeys = {
   dashboardSummary: ["dashboardSummary"] as const,
   incomingRequest: ["incomingRequest"] as const,
   activeDriverRide: ["activeDriverRide"] as const,
+  driverNotifications: ["driverNotifications"] as const,
   driverRideHistory: ["driverRideHistory"] as const,
   driverEarnings: (period: string) => ["driverEarnings", period] as const,
   payoutHistory: ["payoutHistory"] as const,

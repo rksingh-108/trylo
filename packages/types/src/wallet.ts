@@ -1,7 +1,7 @@
 export interface WalletTransaction {
   id: string;
   type: "credit" | "debit";
-  category: "ride" | "top_up" | "refund" | "payout" | "bonus";
+  category: "ride" | "top_up" | "refund" | "payout" | "bonus" | "cancellation_fee";
   amount: number;
   description: string;
   createdAt: string;
