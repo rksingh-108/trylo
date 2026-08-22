@@ -95,7 +95,12 @@ async function onboardDriver(phone: string) {
     token,
     body: { name: "Feature Test Driver", vehicleType: "bike", make: "Honda", model: "Activa", registrationNumber: "KA05FT0001", color: "Red" },
   });
-  await waitFor(async () => (await api<string>("/api/driver/auth/verification-status", { token })).data === "verified", "driver verified", 15000);
+  // KYC auto-verification (lib/kyc.ts) flips each doc ~4s after its own
+  // upload, so this nominally resolves in ~5s. 30s (double the original 15s)
+  // gives headroom for CI runner contention after the earlier e2e-test.ts
+  // step has already put the shared API/DB under load, without masking a
+  // genuine hang - still polls every 300ms via waitFor, no fixed sleep added.
+  await waitFor(async () => (await api<string>("/api/driver/auth/verification-status", { token })).data === "verified", "driver verified", 30000);
   await api("/api/driver/status", { method: "POST", token, body: { isOnline: true } });
   await api("/api/driver/location", { method: "POST", token, body: PICKUP.point });
   const me = await api<{ id: string }>("/api/driver/auth/me", { token });
