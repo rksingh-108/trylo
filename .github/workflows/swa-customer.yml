@@ -1,0 +1,67 @@
+name: Deploy Customer app to Azure Static Web Apps
+
+# Prepared ahead of the actual Azure deployment (see the Azure deployment
+# plan) - this workflow will fail safely (missing secret) until:
+#   1. The trylo-customer Static Web App resource exists in Azure, and
+#   2. Its deployment token is added as the AZURE_SWA_TOKEN_CUSTOMER repo
+#      secret, and
+#   3. NEXT_PUBLIC_API_URL is set as a repo *variable* (not secret - it's a
+#      public URL baked into the client bundle either way) pointing at the
+#      real Container App HTTPS URL.
+# Until then this is inert; push-triggering it does no harm.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "apps/customer/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/swa-customer.yml"
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pnpm via corepack
+        run: corepack enable && corepack prepare pnpm@11.18.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build customer app (static export)
+        # Uses `turbo run build --filter=customer`, NOT `pnpm --filter customer
+        # build` - the latter only runs customer's own build script and skips
+        # @trylo/types entirely. @trylo/types is the one workspace package whose
+        # main/types fields point at a compiled dist/ (the others - ui,
+        # mock-data, design-tokens - point straight at their src/ and need no
+        # build step), and dist/ is gitignored, so on a fresh checkout it
+        # doesn't exist until built. Turbo's dependsOn: ["^build"] in turbo.json
+        # builds @trylo/types first automatically; confirmed locally that
+        # `pnpm --filter customer build` alone fails with "Cannot find module
+        # '@trylo/types'" on a clean checkout, and that this turbo command fixes
+        # it (with --force, bypassing all caching, to be sure).
+        run: pnpm exec turbo run build --filter=customer
+        env:
+          # Explicitly supplied at build time - Next.js inlines NEXT_PUBLIC_*
+          # vars into the client bundle, and apiClient.ts/socketClient.ts
+          # silently fall back to http://localhost:4000 if this is unset, so
+          # this MUST be set as a repo variable before this workflow runs for
+          # real. See apps/customer/package.json / packages/mock-data.
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_SWA_TOKEN_CUSTOMER }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "apps/customer/out"
+          skip_app_build: true

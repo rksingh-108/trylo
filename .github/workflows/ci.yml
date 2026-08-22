@@ -1,0 +1,119 @@
+name: CI
+
+# Monorepo-wide build/type-check/lint/test validation gate. Runs on every push
+# and PR against main, independent of the per-app deploy workflows (which stay
+# path-scoped so an admin-only change doesn't rebuild/redeploy the API, etc).
+# This workflow never touches Azure and needs no repo secrets/variables at
+# all - it only spins up an ephemeral, disposable Postgres service container
+# that exists solely for this job and is destroyed when it ends.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        # Throwaway credentials for this job's own disposable service
+        # container only - matches the existing local docker-compose.yml dev
+        # setup, not a real/production secret of any kind. Never used outside
+        # this CI job; the container (and this password) cease to exist the
+        # moment the job finishes.
+        env:
+          POSTGRES_USER: trylo
+          POSTGRES_PASSWORD: trylo_ci_password
+          POSTGRES_DB: trylo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trylo -d trylo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://trylo:trylo_ci_password@localhost:5432/trylo?schema=public
+      # Ephemeral, CI-only - signs tokens for a database and server that only
+      # exist for the duration of this job. Not a real/production secret.
+      JWT_SECRET: ci-only-not-a-real-secret
+      PORT: 4000
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pnpm via corepack
+        run: corepack enable && corepack prepare pnpm@11.18.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable required Postgres extensions (cube, earthdistance)
+        # Standard contrib modules, no Azure allow-listing quirk here since
+        # this is a plain self-hosted Postgres service container, not Azure
+        # Flexible Server. Matches migration 20260809133427_add_driver_geo_index.
+        run: psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS cube; CREATE EXTENSION IF NOT EXISTS earthdistance;"
+
+      - name: Generate Prisma client
+        working-directory: apps/api
+        run: pnpm exec prisma generate --schema=prisma/schema.prisma
+
+      - name: Apply Prisma migrations
+        working-directory: apps/api
+        run: pnpm exec prisma migrate deploy --schema=prisma/schema.prisma
+
+      - name: Build all apps/packages (types, api, customer, driver, admin)
+        run: pnpm build
+
+      - name: Type-check
+        run: pnpm check-types
+
+      # NOTE: no lint step here on purpose. `pnpm lint` (turbo run lint ->
+      # `next lint` in each frontend app) was tested locally while building
+      # this workflow and fails immediately - there is no committed ESLint
+      # config anywhere in the repo (no .eslintrc*/eslint.config.* in any
+      # app or at the root), so `next lint` tries to launch its interactive
+      # first-run setup wizard, which has no TTY to answer in CI and exits 1.
+      # This is a pre-existing gap, not something introduced by this
+      # workflow - setting up ESLint configs (and fixing whatever violations
+      # that then surfaces across the existing codebase) is a real code
+      # change beyond "wire up CI", so it's flagged here rather than done
+      # silently. Add a lint step back once ESLint is actually configured.
+
+      - name: Start API server
+        working-directory: apps/api
+        run: pnpm start &
+
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/health > /dev/null; then
+              echo "API is healthy"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become healthy in time"
+          exit 1
+
+      - name: Run end-to-end test suite
+        working-directory: apps/api
+        run: pnpm e2e
+
+      - name: Run new-features end-to-end test suite
+        working-directory: apps/api
+        run: npx tsx scripts/e2e-new-features-test.ts

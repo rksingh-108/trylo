@@ -1,0 +1,56 @@
+name: Deploy Driver app to Azure Static Web Apps
+
+# Prepared ahead of the actual Azure deployment (see the Azure deployment
+# plan) - this workflow will fail safely (missing secret) until:
+#   1. The trylo-driver Static Web App resource exists in Azure, and
+#   2. Its deployment token is added as the AZURE_SWA_TOKEN_DRIVER repo
+#      secret, and
+#   3. NEXT_PUBLIC_API_URL is set as a repo *variable* (not secret - it's a
+#      public URL baked into the client bundle either way) pointing at the
+#      real Container App HTTPS URL.
+# Until then this is inert; push-triggering it does no harm.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "apps/driver/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/swa-driver.yml"
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pnpm via corepack
+        run: corepack enable && corepack prepare pnpm@11.18.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build driver app (static export)
+        # Uses turbo, not a plain pnpm filter - see swa-customer.yml's build
+        # step for the full explanation (this builds @trylo/types first,
+        # which `pnpm --filter driver build` alone does not).
+        run: pnpm exec turbo run build --filter=driver
+        env:
+          # Explicitly supplied at build time - see swa-customer.yml for why
+          # this can't be left to the fallback default.
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_SWA_TOKEN_DRIVER }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "apps/driver/out"
+          skip_app_build: true
