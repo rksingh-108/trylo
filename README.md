@@ -267,6 +267,76 @@ Current live architecture, verified directly against the Azure subscription (`az
 
 ---
 
+## Azure Test Environment — Start / Stop
+
+TRYLO's Azure deployment is a **test environment**, not a production service — it exists only to test the app on real devices. To avoid burning Azure for Students credit while it isn't being actively tested, [`scripts/azure-test-env.ps1`](scripts/azure-test-env.ps1) safely starts/stops the one resource that actually costs money while idle: the PostgreSQL Flexible Server.
+
+**Before testing:**
+```powershell
+.\scripts\azure-test-env.ps1 on
+```
+
+**Check current status (read-only, never modifies anything):**
+```powershell
+.\scripts\azure-test-env.ps1 status
+```
+
+**After testing:**
+```powershell
+.\scripts\azure-test-env.ps1 off
+```
+
+Optional:
+```powershell
+.\scripts\azure-test-env.ps1 restart   # restarts PostgreSQL
+```
+
+### Why only PostgreSQL
+
+| Resource | Costs while idle? | What the script does |
+|---|---|---|
+| PostgreSQL Flexible Server (`trylo-db`) | **Yes** — Burstable compute bills while running | Started/stopped explicitly by this script |
+| Container App (`trylo-api`) | No — `minReplicas=0`/`maxReplicas=1`, scales to zero automatically | Left untouched; scale settings are never modified |
+| Static Web Apps (`trylo-customer`/`driver`/`admin`) | No — Free tier | Left untouched |
+
+PostgreSQL should normally be **stopped after every testing session** (`... off`) — it's the only piece of this environment that keeps costing money just for sitting idle.
+
+### Azure limitation: auto-restart after 7 days
+
+Azure automatically restarts a stopped PostgreSQL Flexible Server after it has been stopped for **7 days** — Azure does not allow a flexible server to stay stopped indefinitely. If you leave the environment stopped for longer than that between testing sessions, don't be surprised to find PostgreSQL back in a `Ready` (running) state on its own — this is normal Azure behavior, not something this script caused. If that happens and you're not actively testing, just run:
+```powershell
+.\scripts\azure-test-env.ps1 off
+```
+again to stop it — `off` is idempotent and safe to run any time to confirm/enforce the stopped state.
+
+## ☁️ TRYLO Azure Controls
+
+For everyday use, [`azure/`](azure/) has double-click `.bat` wrappers around `scripts/azure-test-env.ps1` — no terminal needed.
+
+**Before testing** — double-click:
+```
+azure/start-trylo.bat
+```
+
+**After testing** — double-click:
+```
+azure/stop-trylo.bat
+```
+
+**Check status** (read-only) — double-click:
+```
+azure/status-trylo.bat
+```
+
+**Restart PostgreSQL** — double-click:
+```
+azure/restart-trylo.bat
+```
+
+These are convenience wrappers only — each one just calls `scripts/azure-test-env.ps1` (`on` / `off` / `status` / `restart`) and prints a clear banner around it. They contain no Azure logic of their own, work regardless of which folder they're launched from, and never modify PowerShell's execution policy permanently (each invocation uses `-ExecutionPolicy Bypass` for that single run only).
+
+---
+
 ## ⚠️ Security & Testing Disclaimer
 
 TRYLO is an independent engineering/learning project. It has been deployed to Azure and tested with real devices in a small, controlled setting — **it is not presented as a production-scale ride-hailing platform**, and no claims are made about production readiness, scalability to many concurrent users, or commercial launch.
