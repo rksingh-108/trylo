@@ -12,6 +12,13 @@ const envSchema = z.object({
   // as before.
   HTTPS_CERT_PATH: z.string().optional(),
   HTTPS_KEY_PATH: z.string().optional(),
+  // Set only by the CI workflow (.github/workflows/ci.yml) to bypass the
+  // global per-IP rate limiter (see lib/rateLimiters.ts). CI runs both e2e
+  // suites back-to-back against one long-lived server process from a single
+  // source IP, which can exceed that per-IP budget on request volume alone -
+  // nothing to do with either suite actually misbehaving. Unset everywhere
+  // else (production, local dev) - the server behaves exactly as before.
+  DISABLE_RATE_LIMIT: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -23,4 +30,5 @@ if (!parsed.success) {
 export const env = {
   ...parsed.data,
   corsOrigins: parsed.data.CORS_ORIGINS.split(",").map((o) => o.trim()),
+  disableRateLimit: parsed.data.DISABLE_RATE_LIMIT === "true",
 };

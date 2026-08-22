@@ -48,6 +48,12 @@ jobs:
       JWT_SECRET: ci-only-not-a-real-secret
       PORT: 4000
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      # CI-only bypass for the global per-IP rate limiter (see
+      # lib/rateLimiters.ts) - the two e2e suites below run back-to-back
+      # against this one server process from a single source IP and can
+      # exceed its per-IP budget on request volume alone. Never set outside
+      # this workflow; production/local dev are unaffected.
+      DISABLE_RATE_LIMIT: "true"
 
     steps:
       - uses: actions/checkout@v4

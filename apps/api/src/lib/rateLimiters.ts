@@ -1,11 +1,22 @@
 import rateLimit from "express-rate-limit";
+import { env } from "../env";
 
-/** General abuse backstop across the whole API. Generous — this is not the primary defense. */
+/**
+ * General abuse backstop across the whole API. Generous — this is not the primary defense.
+ *
+ * `skip` bypasses this in CI only (DISABLE_RATE_LIMIT=true, set exclusively
+ * by .github/workflows/ci.yml — see env.ts). CI runs two e2e suites
+ * back-to-back against one long-lived server process from a single source
+ * IP, which can exceed this per-IP budget on request volume alone. Unset
+ * (and therefore always false) in production and local dev, so this limiter
+ * behaves exactly as before everywhere else.
+ */
 export const globalLimiter = rateLimit({
   windowMs: 60_000,
   limit: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => env.disableRateLimit,
 });
 
 /**
