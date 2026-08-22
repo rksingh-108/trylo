@@ -66,7 +66,10 @@ jobs:
         # Standard contrib modules, no Azure allow-listing quirk here since
         # this is a plain self-hosted Postgres service container, not Azure
         # Flexible Server. Matches migration 20260809133427_add_driver_geo_index.
-        run: psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS cube; CREATE EXTENSION IF NOT EXISTS earthdistance;"
+        # psql/libpq doesn't understand Prisma's "?schema=public" query
+        # parameter, so it's stripped here for this one command only -
+        # DATABASE_URL itself (used by Prisma/the app) is left untouched.
+        run: psql "${DATABASE_URL%%\?*}" -c "CREATE EXTENSION IF NOT EXISTS cube; CREATE EXTENSION IF NOT EXISTS earthdistance;"
 
       - name: Generate Prisma client
         working-directory: apps/api
