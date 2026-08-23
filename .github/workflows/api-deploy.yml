@@ -1,0 +1,71 @@
+name: Deploy API to Azure Container Apps
+
+# Prepared ahead of the actual Azure deployment (see the Azure deployment
+# plan) - this workflow will fail safely until:
+#   1. The trylo-api Container App exists in Azure (created once manually,
+#      per the deployment plan's step-by-step order - this workflow only
+#      updates its image afterwards, it never creates the resource), with
+#      its registry credentials already pointed at ghcr.io (or the ghcr.io
+#      package for this image made public, avoiding the need for registry
+#      credentials at all), and
+#   2. AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID are set as
+#      repo secrets for OIDC federated login (no client secret/password
+#      needed - see https://github.com/Azure/login#login-with-openid-connect-oidc-recommended),
+#      and
+#   3. AZURE_RESOURCE_GROUP / AZURE_CONTAINER_APP_NAME are set as repo
+#      variables (not secrets - just resource names).
+# DATABASE_URL / JWT_SECRET / CORS_ORIGINS are never touched by this
+# workflow at all - they're Container Apps secrets/env vars set directly on
+# the Azure resource, never in Git or GitHub Actions config.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "packages/types/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/api-deploy.yml"
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/trylo-api:latest
+            ghcr.io/${{ github.repository_owner }}/trylo-api:${{ github.sha }}
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update Container App image
+        run: |
+          az containerapp update \
+            --name "${{ vars.AZURE_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --image "ghcr.io/${{ github.repository_owner }}/trylo-api:${{ github.sha }}"
