@@ -52,6 +52,23 @@ const DEFAULT_CENTER: MapGeoPoint = { lat: 12.9716, lng: 77.5946 };
 // https://openfreemap.org
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 
+// MapLibre's own worker-URL auto-detection doesn't work once bundled into a
+// Next.js/webpack chunk (confirmed empirically: it defaults to an empty
+// string, so `new Worker("")` resolves to the current page's own URL, the
+// worker never becomes functional, and the style/tiles silently never load -
+// reproduced identically in both `next dev` and the static-export build).
+// `new URL("maplibre-gl/...", import.meta.url)` looked like the standard fix
+// but doesn't work here either: webpack only rewrites that pattern for
+// relative specifiers, so a bare cross-package specifier just evaluates as a
+// literal (broken, 404ing) runtime URL - also confirmed empirically. Instead,
+// scripts/copy-maplibre-worker.mjs copies the real worker file into this
+// app's public/ folder before every dev/build, and it's referenced here by
+// plain absolute path - a genuine static asset, no bundler URL resolution
+// involved at all. Must run once before any Map is constructed.
+if (typeof window !== "undefined") {
+  maplibregl.setWorkerUrl("/maplibre-gl-csp-worker.js");
+}
+
 const ROUTE_SOURCE_ID = "trylo-route";
 const ROUTE_LAYER_ID = "trylo-route-line";
 const ROUTE_FADE_MS = 500;
@@ -405,7 +422,10 @@ export function PremiumMap({
       instance.addControl(new maplibregl.NavigationControl({ showCompass: true, showZoom: true }), "top-right");
     }
     instance.on("load", () => setReady(true));
-    instance.on("error", () => setLoadError(true));
+    instance.on("error", (e) => {
+      console.error("MapLibre map error:", e.error);
+      setLoadError(true);
+    });
 
     mapRef.current = instance;
     setMap(instance);

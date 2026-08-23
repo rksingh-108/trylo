@@ -3,8 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "predev": "node ../../scripts/copy-maplibre-worker.mjs driver",
     "dev": "next dev --port 3001",
+    "predev:https": "node ../../scripts/copy-maplibre-worker.mjs driver",
     "dev:https": "next dev --port 3001 --experimental-https --experimental-https-key ../../certs/lan-key.pem --experimental-https-cert ../../certs/lan-cert.pem",
+    "prebuild": "node ../../scripts/copy-maplibre-worker.mjs driver",
     "build": "next build",
     "start": "next start --port 3001",
     "lint": "next lint",

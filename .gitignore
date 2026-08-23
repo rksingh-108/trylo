@@ -9,6 +9,11 @@ out/
 # turbo
 .turbo/
 
+# copied fresh from node_modules by scripts/copy-maplibre-worker.mjs
+# (predev/prebuild) - never hand-maintained, always regenerated
+apps/customer/public/maplibre-gl-csp-worker.js
+apps/driver/public/maplibre-gl-csp-worker.js
+
 # build
 dist/
 build/

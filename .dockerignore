@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+.git
+.github
+certs
+**/.env
+**/.env.*
+!**/.env.example
+*.log
+start-*.log
+stop-*.log
