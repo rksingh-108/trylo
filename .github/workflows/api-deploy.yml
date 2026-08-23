@@ -39,12 +39,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ghcr.io/rksingh-108/trylo-api was originally created by a manual local
+      # push (before this workflow existed), not by a GitHub Actions run - so
+      # it has no "Actions access" link to this repo. That link can only be
+      # granted for a user-owned (non-org) package via the GitHub web UI;
+      # there is no REST or GraphQL API for it (confirmed: the only
+      # package-related GraphQL mutation at all is deletePackageVersion).
+      # GHCR_TOKEN is a personal access token for the package owner
+      # (rksingh-108) with write:packages scope - it authenticates as the
+      # owner's own identity, which already has write access to their own
+      # package regardless of the repo-link setting, so this sidesteps the
+      # limitation entirely without deleting/recreating anything.
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: rksingh-108
+          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Build and push API image
         uses: docker/build-push-action@v6
