@@ -93,6 +93,13 @@ router.post("/:id/approve", requireAuth("admin"), async (req, res) => {
     res.status(404).json({ error: "Driver not found" });
     return;
   }
+  // Same consistency fix as /reject below, mirrored: the Approve button has no
+  // guard requiring documents to already be verified, so without this an admin
+  // could approve a driver whose KYC screen still shows pending/rejected docs.
+  await db.kycDocument.updateMany({
+    where: { driverId: driver.id, status: { in: ["pending_review", "rejected"] } },
+    data: { status: "verified" },
+  });
   await logAdminAction(req.auth!.id, "driver_approved", "driver", driver.id);
   res.json({ ...serializeDriver(driver), suspended: driver.suspended });
 });
@@ -108,6 +115,15 @@ router.post("/:id/reject", requireAuth("admin"), async (req, res) => {
     res.status(404).json({ error: "Driver not found" });
     return;
   }
+  // Keep each document's own status consistent with the driver-level rejection -
+  // previously only verificationStatus changed, so the driver's KYC screen kept
+  // showing every document as "Verified" with nothing actually flagged. Only
+  // touches docs that were verified/under review; a document never uploaded
+  // stays "not_uploaded", not "rejected".
+  await db.kycDocument.updateMany({
+    where: { driverId: driver.id, status: { in: ["verified", "pending_review"] } },
+    data: { status: "rejected" },
+  });
   await logAdminAction(req.auth!.id, "driver_rejected", "driver", driver.id, parsed.success ? parsed.data.reason : undefined);
   res.json({ ...serializeDriver(driver), suspended: driver.suspended });
 });
