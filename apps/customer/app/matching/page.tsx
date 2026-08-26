@@ -16,7 +16,7 @@ import {
   RideChatSheet,
 } from "@trylo/ui";
 import { getRideMessages } from "@trylo/mock-data";
-import { useCancelRide, useRideChat, useRideStatus } from "@trylo/mock-data/hooks";
+import { useActiveRide, useCancelRide, useRideChat, useRideStatus } from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
 
 function initials(name: string) {
@@ -42,11 +42,21 @@ const matchedItem = {
 
 export default function MatchingPage() {
   const router = useRouter();
-  const { activeRideId, reset } = useBookingStore();
+  const { activeRideId, setActiveRideId, reset } = useBookingStore();
+
+  // `activeRideId` lives only in an in-memory store, so a page refresh while
+  // still "Finding your driver" would otherwise lose it and bounce straight to
+  // /home even though the ride is still alive server-side - rehydrate from the
+  // server first (same pattern as apps/customer/app/ride/page.tsx) and only
+  // give up on /home once we've actually confirmed there's nothing to resume.
+  const { data: rehydratedRide, isFetched: rehydrationFetched } = useActiveRide(!activeRideId);
 
   React.useEffect(() => {
-    if (!activeRideId) router.replace("/home");
-  }, [activeRideId, router]);
+    if (activeRideId) return;
+    if (!rehydrationFetched) return;
+    if (rehydratedRide) setActiveRideId(rehydratedRide.id);
+    else router.replace("/home");
+  }, [activeRideId, rehydrationFetched, rehydratedRide, router, setActiveRideId]);
 
   const { data: ride } = useRideStatus(activeRideId);
   const cancelRide = useCancelRide();

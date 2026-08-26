@@ -14,7 +14,7 @@ import {
   Skeleton,
   type PlaceResult,
 } from "@trylo/ui";
-import { useCurrentUser, useSavedPlaces } from "@trylo/mock-data/hooks";
+import { useActiveRide, useCurrentUser, useSavedPlaces } from "@trylo/mock-data/hooks";
 import { CITY_CENTER } from "@trylo/mock-data";
 import type { GeoPoint } from "@trylo/types";
 import { useBookingStore } from "@/lib/store";
@@ -34,7 +34,18 @@ const PLACE_ICONS: Record<string, React.ComponentType<{ size?: number; className
 export default function HomePage() {
   const router = useRouter();
   const { data: user } = useCurrentUser();
-  const { pickup, drop, setPickup, setDrop } = useBookingStore();
+  const { pickup, drop, setPickup, setDrop, setActiveRideId } = useBookingStore();
+
+  // `activeRideId` lives only in an in-memory store, so a fresh app launch
+  // mid-ride (browser/PWA reload, which always re-lands on /home after
+  // re-authenticating - see apps/customer/app/page.tsx) would otherwise strand
+  // the rider here on the plain booking screen instead of their actual ride.
+  const { data: activeRide } = useActiveRide();
+  React.useEffect(() => {
+    if (!activeRide) return;
+    setActiveRideId(activeRide.id);
+    router.replace(activeRide.status === "requested" ? "/matching" : "/ride");
+  }, [activeRide, router, setActiveRideId]);
   const [pickupQuery, setPickupQuery] = React.useState("");
   const [dropQuery, setDropQuery] = React.useState("");
   const [sheetOpen, setSheetOpen] = React.useState(false);

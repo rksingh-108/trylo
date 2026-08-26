@@ -2,10 +2,17 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Clock3, TrendingUp, User, Wallet, Zap } from "lucide-react";
 import { AnimatedCounter, Card, PremiumMap, RatingStars, Switch } from "@trylo/ui";
-import { useDashboardSummary, useIncomingRequest, useReportLiveLocation, useSetOnlineStatus } from "@trylo/mock-data/hooks";
+import {
+  useActiveDriverRide,
+  useDashboardSummary,
+  useIncomingRequest,
+  useReportLiveLocation,
+  useSetOnlineStatus,
+} from "@trylo/mock-data/hooks";
 import { IncomingRequestOverlay } from "@/components/incoming-request-overlay";
 
 function formatOnlineDuration(minutes: number) {
@@ -16,9 +23,20 @@ function formatOnlineDuration(minutes: number) {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { data: summary } = useDashboardSummary();
   const setOnlineStatus = useSetOnlineStatus();
   const isOnline = summary?.isOnline ?? false;
+
+  // The driver's active ride is looked up purely by driver identity server-side
+  // (no client-stored ride id needed), so a fresh app launch mid-ride (browser/PWA
+  // reload after re-authenticating, phone backgrounding, etc.) would otherwise
+  // strand the driver here on the plain online/offline dashboard instead of their
+  // actual in-flight ride.
+  const { data: activeRide } = useActiveDriverRide();
+  React.useEffect(() => {
+    if (activeRide) router.replace("/ride");
+  }, [activeRide, router]);
 
   const { data: offer } = useIncomingRequest(isOnline);
 
