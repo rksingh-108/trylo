@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Clock3, TrendingUp, User, Wallet, Zap } from "lucide-react";
-import { AnimatedCounter, Card, PremiumMap, RatingStars, Switch } from "@trylo/ui";
+import { AnimatedCounter, Card, PremiumMap, RatingStars, Switch, toast } from "@trylo/ui";
 import {
   useActiveDriverRide,
   useDashboardSummary,
@@ -41,7 +41,13 @@ export default function DashboardPage() {
   const { data: offer } = useIncomingRequest(isOnline);
 
   function handleToggle(next: boolean) {
-    setOnlineStatus.mutate(next);
+    setOnlineStatus.mutate(next, {
+      onError: () => {
+        toast.error(next ? "Couldn't go online" : "Couldn't go offline", {
+          description: "Please try again in a moment.",
+        });
+      },
+    });
   }
 
   const liveGpsLocation = useReportLiveLocation(isOnline);

@@ -882,14 +882,23 @@ async function runGeoIndexScenarios() {
   }
 
   async function createGeoRide(): Promise<string> {
+    const geoDrop = { lat: GEO_PICKUP.lat + 0.05, lng: GEO_PICKUP.lng + 0.05 };
+    const fares = await api<Array<{ vehicleType: string; fare: Record<string, number> }>>(
+      "/api/customer/fares/estimates",
+      {
+        token: customerToken,
+        query: { pickupLat: GEO_PICKUP.lat, pickupLng: GEO_PICKUP.lng, dropLat: geoDrop.lat, dropLng: geoDrop.lng },
+      }
+    );
+    const bikeFare = fares.data.find((f) => f.vehicleType === "bike")!;
     const rideRes = await api<{ id: string; status: string }>("/api/customer/rides", {
       method: "POST",
       token: customerToken,
       body: {
         pickup: { address: "Geo Test Pickup", point: GEO_PICKUP },
-        drop: { address: "Geo Test Drop", point: { lat: GEO_PICKUP.lat + 0.05, lng: GEO_PICKUP.lng + 0.05 } },
+        drop: { address: "Geo Test Drop", point: geoDrop },
         vehicleType: "bike",
-        fare: { base: 15, distance: 10, time: 5, surge: 0, promoDiscount: 0, total: 30, currency: "INR" },
+        fare: bikeFare.fare,
       },
     });
     assert(rideRes.status === 200 && rideRes.data.status === "requested", "geo-test ride created");

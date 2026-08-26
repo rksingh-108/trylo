@@ -1,4 +1,7 @@
 {
+  "routes": [
+    { "route": "/history/*", "rewrite": "/history/placeholder.html" }
+  ],
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": ["/_next/*", "/icon-*.png", "/apple-icon", "/manifest.webmanifest", "/sw.js", "*.{css,js,json,png,jpg,jpeg,svg,ico,webp,txt}"]

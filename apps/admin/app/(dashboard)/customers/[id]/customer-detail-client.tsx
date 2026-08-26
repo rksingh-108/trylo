@@ -1,11 +1,12 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, UserX } from "lucide-react";
 import {
   Badge,
   Button,
   Card,
+  EmptyState,
   Skeleton,
   Table,
   TableBody,
@@ -45,8 +46,23 @@ export default function AdminCustomerDetailClient() {
     }
   }
 
-  if (isLoading || !customer) {
+  if (isLoading) {
     return <Skeleton className="h-96 rounded-2xl" />;
+  }
+
+  if (!customer) {
+    return (
+      <EmptyState
+        icon={<UserX />}
+        title="Customer not found"
+        description="This customer doesn't exist or may have been removed."
+        action={
+          <Button variant="outline" onClick={() => router.push("/customers")}>
+            Back to customers
+          </Button>
+        }
+      />
+    );
   }
 
   return (

@@ -193,11 +193,18 @@ async function offerUnassignedRides() {
     });
 
     const offerExpiresAt = new Date(Date.now() + OFFER_WINDOW_MS);
-    const updated = await db.ride.update({
-      where: { id: ride.id },
+    // Guarded on status + driverId:null so a concurrent customer-cancel (which
+    // only succeeds while the ride is still unassigned/"requested") can never
+    // be silently overwritten by this offer landing a moment later - if the
+    // ride moved on in the meantime, skip it instead of resurrecting it with a
+    // stale offer.
+    const { count } = await db.ride.updateMany({
+      where: { id: ride.id, status: "requested", driverId: null },
       data: { driverId: best.id, offerExpiresAt },
-      include: { rider: true },
     });
+    if (count === 0) continue;
+
+    const updated = await db.ride.findUniqueOrThrow({ where: { id: ride.id }, include: { rider: true } });
     await db.driver.update({ where: { id: best.id }, data: { offeredCount: { increment: 1 } } });
 
     busyDriverIds.add(best.id);

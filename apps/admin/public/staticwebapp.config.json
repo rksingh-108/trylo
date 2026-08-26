@@ -1,4 +1,9 @@
 {
+  "routes": [
+    { "route": "/customers/*", "rewrite": "/customers/placeholder.html" },
+    { "route": "/drivers/*", "rewrite": "/drivers/placeholder.html" },
+    { "route": "/rides/*", "rewrite": "/rides/placeholder.html" }
+  ],
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": ["/_next/*", "*.{css,js,json,png,jpg,jpeg,svg,ico,webp,txt}"]

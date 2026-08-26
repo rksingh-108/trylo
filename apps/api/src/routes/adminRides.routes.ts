@@ -54,7 +54,11 @@ router.get("/:id", requireAuth("admin"), async (req, res) => {
     where: { id: req.params.id },
     include: { driver: true, rider: true },
   });
-  res.json(ride ? serializeRide(ride) : null);
+  if (!ride) {
+    res.status(404).json({ error: "Ride not found" });
+    return;
+  }
+  res.json(serializeRide(ride));
 });
 
 export default router;

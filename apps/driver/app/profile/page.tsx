@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bike, Car, CarTaxiFront, ChevronRight, HelpCircle, LogOut, Mail, Palette, Phone } from "lucide-react";
+import { Bike, Car, CarTaxiFront, HelpCircle, LogOut, Mail, Palette, Phone } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -128,27 +128,29 @@ export default function ProfilePage() {
 
       <div className="mt-6">
         <p className="mb-2 text-sm font-medium text-foreground">Support</p>
-        <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
+        {/* Not wired up yet - no support backend/telephony exists. Shown
+            disabled rather than as live-looking rows that do nothing. */}
+        <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card opacity-50">
           <div className="flex items-center gap-3 p-4">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
               <HelpCircle size={18} className="text-foreground" />
             </span>
             <p className="flex-1 text-sm font-medium text-foreground">Help center</p>
-            <ChevronRight size={16} className="text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Coming soon</span>
           </div>
           <div className="flex items-center gap-3 p-4">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
               <Phone size={18} className="text-foreground" />
             </span>
             <p className="flex-1 text-sm font-medium text-foreground">Call support</p>
-            <ChevronRight size={16} className="text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Coming soon</span>
           </div>
           <div className="flex items-center gap-3 p-4">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
               <Mail size={18} className="text-foreground" />
             </span>
             <p className="flex-1 text-sm font-medium text-foreground">Email us</p>
-            <ChevronRight size={16} className="text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Coming soon</span>
           </div>
         </div>
       </div>

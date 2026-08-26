@@ -289,12 +289,7 @@ async function run() {
 
   // 3d. Insufficient balance: cancellation still succeeds, but no fee is charged.
   const poorCustomer = await onboardCustomer(`8${suffix}4`, 5); // only ₹5, less than the ₹20 fee
-  const poorRideRes = await api<{ id: string }>("/api/customer/rides", {
-    method: "POST",
-    token: poorCustomer.token,
-    body: { pickup: PICKUP, drop: DROP, vehicleType: "bike", fare: { base: 15, distance: 20, time: 5, surge: 0, promoDiscount: 0, total: 40, currency: "INR" } },
-  });
-  const poorRideId = poorRideRes.data.id;
+  const poorRideId = await createRide(poorCustomer.token);
   await waitFor(async () => {
     const acc = await api<{ status: string }>(`/api/driver/requests/${poorRideId}/accept`, { method: "POST", token: driver.token });
     return acc.status === 200 && acc.data ? acc : null;

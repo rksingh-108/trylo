@@ -42,9 +42,13 @@ export default function ProfileSetupPage() {
   }, [nameValue]);
 
   async function onSubmit(values: ProfileInput) {
-    await completeProfile.mutateAsync({ name: values.name, email: values.email || undefined });
-    toast.success("Profile saved");
-    router.push("/home");
+    try {
+      await completeProfile.mutateAsync({ name: values.name, email: values.email || undefined });
+      toast.success("Profile saved");
+      router.push("/home");
+    } catch {
+      toast.error("Couldn't save your profile. Try again.");
+    }
   }
 
   return (

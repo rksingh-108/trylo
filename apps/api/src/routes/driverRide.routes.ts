@@ -95,12 +95,21 @@ router.get("/dashboard", requireAuth("driver"), async (req, res) => {
   const todayRides = await db.ride.findMany({
     where: { driverId: driver.id, status: "completed", completedAt: { gte: startOfDay } },
   });
+  // Earnings summed from DriverEarning rows, not raw ride fares - a completed
+  // ride whose payment failed never gets a DriverEarning row (see
+  // /rides/:rideId/end), so it correctly contributes nothing here instead of
+  // being counted as money the driver made (matches GET /earnings, which
+  // already only ever reads from DriverEarning for the same reason).
+  const todayEarnings = await db.driverEarning.aggregate({
+    where: { driverId: driver.id, createdAt: { gte: startOfDay } },
+    _sum: { amount: true },
+  });
   const onlineMinutes = driver.onlineSince ? Math.floor((Date.now() - driver.onlineSince.getTime()) / 60000) : 0;
 
   res.json({
     driver: serializeDriver(driver),
     isOnline: driver.isOnline,
-    todayEarnings: todayRides.reduce((sum, r) => sum + r.fareTotal, 0),
+    todayEarnings: todayEarnings._sum.amount ?? 0,
     todayRides: todayRides.length,
     onlineMinutes,
   });

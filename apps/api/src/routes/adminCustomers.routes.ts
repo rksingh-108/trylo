@@ -63,7 +63,11 @@ router.get("/", requireAuth("admin"), async (req, res) => {
 
 router.get("/:id", requireAuth("admin"), async (req, res) => {
   const user = await db.user.findUnique({ where: { id: req.params.id } });
-  res.json(user ? serializeCustomer(user) : null);
+  if (!user) {
+    res.status(404).json({ error: "Customer not found" });
+    return;
+  }
+  res.json(serializeCustomer(user));
 });
 
 router.get("/:id/rides", requireAuth("admin"), async (req, res) => {

@@ -37,10 +37,14 @@ router.post("/otp/verify", async (req, res) => {
   }
 
   let user = await db.user.findUnique({ where: { phone } });
-  const isNewUser = !user;
   if (!user) {
     user = await db.user.create({ data: { phone } });
   }
+  // Based on whether the profile was ever actually completed, not row
+  // existence - otherwise a user who navigates back (or re-verifies the same
+  // phone) mid-onboarding, before setting a name, gets routed straight past
+  // /auth/profile on the next verify and is stuck with a blank name forever.
+  const isNewUser = !user.name;
 
   if (user.suspended) {
     res.json({ success: false, isNewUser: false, user: null, reason: "suspended" });

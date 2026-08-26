@@ -46,7 +46,11 @@ router.get("/", requireAuth("admin"), async (req, res) => {
 
 router.get("/:id", requireAuth("admin"), async (req, res) => {
   const driver = await db.driver.findUnique({ where: { id: req.params.id } });
-  res.json(driver ? { ...serializeDriver(driver), suspended: driver.suspended } : null);
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+  res.json({ ...serializeDriver(driver), suspended: driver.suspended });
 });
 
 router.get("/:id/kyc", requireAuth("admin"), async (req, res) => {

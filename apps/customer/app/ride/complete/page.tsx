@@ -194,7 +194,7 @@ export default function RideCompletePage() {
         )}
         {tip > 0 && (
           <div className="mt-2 flex justify-between text-sm">
-            <span className="text-muted-foreground">Tip</span>
+            <span className="text-muted-foreground">Tip (not yet supported — not charged)</span>
             <span className="text-foreground">₹{tip}</span>
           </div>
         )}
@@ -207,7 +207,9 @@ export default function RideCompletePage() {
           >
             {paymentFailed ? "Amount due" : "Total paid"}
           </span>
-          <FareBadge amount={ride.fare.total + tip} className={cn("text-lg", paymentFailed && "text-destructive")} />
+          {/* Only the fare is ever actually charged — tipping isn't wired up to any
+              payment path yet, so it must never be folded into what "paid" claims. */}
+          <FareBadge amount={ride.fare.total} className={cn("text-lg", paymentFailed && "text-destructive")} />
         </div>
       </motion.div>
 

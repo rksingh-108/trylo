@@ -10,7 +10,11 @@ router.get("/", requireAuth("customer"), async (req, res) => {
   res.json(await getWalletPayload(req.auth!.id));
 });
 
-const topUpSchema = z.object({ amount: z.number().positive() });
+// .int(): walletBalance/WalletTransaction.amount are Int columns - a
+// non-integer amount would otherwise throw deep inside Prisma instead of
+// failing validation cleanly. Capped well above any realistic top-up to
+// reject an obviously-bogus value without constraining real usage.
+const topUpSchema = z.object({ amount: z.number().int().positive().max(100_000) });
 
 router.post("/topup", requireAuth("customer"), async (req, res) => {
   const parsed = topUpSchema.safeParse(req.body);

@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "framer-motion";
 import { Bike, Car, CarTaxiFront } from "lucide-react";
-import { Button, cn, Input, Label, PageTransition } from "@trylo/ui";
+import { Button, cn, Input, Label, PageTransition, toast } from "@trylo/ui";
 import { useSubmitVehicleDetails } from "@trylo/mock-data/hooks";
 import { vehicleDetailsSchema, type VehicleDetailsInput } from "@/lib/validation";
 import type { VehicleType } from "@trylo/types";
@@ -37,8 +37,12 @@ export default function VehicleDetailsPage() {
   const vehicleType = watch("vehicleType");
 
   async function onSubmit(values: VehicleDetailsInput) {
-    await submitVehicle.mutateAsync(values);
-    router.push("/auth/pending");
+    try {
+      await submitVehicle.mutateAsync(values);
+      router.push("/auth/pending");
+    } catch {
+      toast.error("Couldn't save your vehicle details. Try again.");
+    }
   }
 
   return (

@@ -16,11 +16,12 @@ export async function verifyOtpChallenge(
   purpose: OtpPurpose,
   code: string
 ): Promise<boolean> {
-  const challenge = await db.otpChallenge.findFirst({
+  // A single atomic updateMany (rather than findFirst-then-update) so two
+  // concurrent verify requests presenting the same still-valid code can never
+  // both pass the check before either write lands.
+  const { count } = await db.otpChallenge.updateMany({
     where: { phone, purpose, code, consumed: false, expiresAt: { gt: new Date() } },
-    orderBy: { createdAt: "desc" },
+    data: { consumed: true },
   });
-  if (!challenge) return false;
-  await db.otpChallenge.update({ where: { id: challenge.id }, data: { consumed: true } });
-  return true;
+  return count > 0;
 }

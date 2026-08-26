@@ -89,6 +89,12 @@ export default function ActiveRidePage() {
   const [chatOpen, setChatOpen] = React.useState(false);
   const [sosOpen, setSosOpen] = React.useState(false);
   const cancelHandledRef = React.useRef(false);
+  const [seenMessageCount, setSeenMessageCount] = React.useState(0);
+  const hasUnreadMessages = chatMessages.length > seenMessageCount;
+
+  React.useEffect(() => {
+    if (chatOpen) setSeenMessageCount(chatMessages.length);
+  }, [chatOpen, chatMessages.length]);
 
   useLiveNotifications(ride?.id ?? null, "driver", (notification) => {
     toast.info(notification.title, { description: notification.body });
@@ -200,11 +206,14 @@ export default function ActiveRidePage() {
                 <Button
                   variant="secondary"
                   size="icon"
-                  className="rounded-full"
+                  className="relative rounded-full"
                   aria-label="Message rider"
                   onClick={() => setChatOpen(true)}
                 >
                   <MessageCircle size={16} />
+                  {hasUnreadMessages && (
+                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-destructive" />
+                  )}
                 </Button>
               </div>
             </CardContent>

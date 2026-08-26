@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   BarChart3,
@@ -74,9 +75,13 @@ export function Sidebar() {
 
 function LogoutButton({ onLoggedOut }: { onLoggedOut: () => void }) {
   const logout = useAdminLogout();
+  const queryClient = useQueryClient();
 
   async function handleLogout() {
     await logout.mutateAsync();
+    // Otherwise stale (possibly another admin's) cached data can still render
+    // on a Back navigation or a same-tab re-login before a fresh fetch lands.
+    queryClient.clear();
     onLoggedOut();
   }
 

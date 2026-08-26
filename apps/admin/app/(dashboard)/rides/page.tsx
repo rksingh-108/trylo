@@ -23,12 +23,24 @@ export default function AdminRidesPage() {
   const [paymentStatus, setPaymentStatus] = React.useState<PaymentStatus | "all">("all");
   const [customerId, setCustomerId] = React.useState("");
   const [driverId, setDriverId] = React.useState("");
+  const [debouncedCustomerId, setDebouncedCustomerId] = React.useState("");
+  const [debouncedDriverId, setDebouncedDriverId] = React.useState("");
+
+  React.useEffect(() => {
+    const id = setTimeout(() => setDebouncedCustomerId(customerId), 300);
+    return () => clearTimeout(id);
+  }, [customerId]);
+
+  React.useEffect(() => {
+    const id = setTimeout(() => setDebouncedDriverId(driverId), 300);
+    return () => clearTimeout(id);
+  }, [driverId]);
 
   const { data, isLoading } = useAdminRides({
     status: status === "all" ? undefined : status,
     paymentStatus: paymentStatus === "all" ? undefined : paymentStatus,
-    customerId: customerId || undefined,
-    driverId: driverId || undefined,
+    customerId: debouncedCustomerId || undefined,
+    driverId: debouncedDriverId || undefined,
     limit: 50,
   });
 

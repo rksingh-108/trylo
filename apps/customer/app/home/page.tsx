@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Home as HomeIcon, MapPin, Pencil, Search, User, Wallet } from "lucide-react";
+import { Bell, Briefcase, Home as HomeIcon, MapPin, Pencil, Search, User, Wallet } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
@@ -128,6 +128,13 @@ export default function HomePage() {
           <p className="font-display text-base font-semibold text-foreground">{user?.name || "Rider"}</p>
         </div>
         <div className="flex gap-2">
+          <Link
+            href="/notifications"
+            className="glass grid h-11 w-11 place-items-center rounded-full text-foreground shadow-elevation-2 transition-transform active:scale-95"
+            aria-label="Notifications"
+          >
+            <Bell size={18} />
+          </Link>
           <Link
             href="/wallet"
             className="glass grid h-11 w-11 place-items-center rounded-full text-foreground shadow-elevation-2 transition-transform active:scale-95"

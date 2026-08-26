@@ -126,7 +126,12 @@ router.get("/verification-status", requireAuth("driver"), async (req, res) => {
   const allVerified = docs.length > 0 && docs.every((d) => d.status === "verified");
 
   let driver = await db.driver.findUnique({ where: { id: req.auth!.id } });
-  if (allVerified && driver && driver.verificationStatus === "pending") {
+  // Also handles "rejected" - a driver an admin rejected can resubmit every
+  // document and, once they all re-verify, become verified again on their
+  // own; previously only "pending" could ever transition here, so a rejected
+  // driver who did everything asked of them stayed stuck until an admin
+  // manually re-approved them.
+  if (allVerified && driver && (driver.verificationStatus === "pending" || driver.verificationStatus === "rejected")) {
     driver = await db.driver.update({ where: { id: driver.id }, data: { verificationStatus: "verified" } });
   }
 

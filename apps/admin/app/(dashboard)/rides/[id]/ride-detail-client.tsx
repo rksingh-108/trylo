@@ -1,8 +1,8 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
-import { Badge, Card, Skeleton } from "@trylo/ui";
+import { ChevronLeft, PackageX } from "lucide-react";
+import { Badge, Button, Card, EmptyState, Skeleton } from "@trylo/ui";
 import { useAdminRide } from "@trylo/mock-data/hooks";
 
 export default function AdminRideDetailClient() {
@@ -10,8 +10,23 @@ export default function AdminRideDetailClient() {
   const params = useParams<{ id: string }>();
   const { data: ride, isLoading } = useAdminRide(params.id ?? null);
 
-  if (isLoading || !ride) {
+  if (isLoading) {
     return <Skeleton className="h-96 rounded-2xl" />;
+  }
+
+  if (!ride) {
+    return (
+      <EmptyState
+        icon={<PackageX />}
+        title="Ride not found"
+        description="This ride doesn't exist or may have been removed."
+        action={
+          <Button variant="outline" onClick={() => router.push("/rides")}>
+            Back to rides
+          </Button>
+        }
+      />
+    );
   }
 
   return (

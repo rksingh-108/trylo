@@ -5,9 +5,8 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "framer-motion";
-import { Loader2, Phone, ShieldCheck } from "lucide-react";
+import { Phone, ShieldCheck } from "lucide-react";
 import { Button, Input, Label, PageTransition } from "@trylo/ui";
-import { useRequestOtp } from "@trylo/mock-data/hooks";
 import { phoneSchema, type PhoneInput } from "@/lib/validation";
 
 const container = {
@@ -22,15 +21,15 @@ const item = {
 
 export default function AuthPage() {
   const router = useRouter();
-  const requestOtp = useRequestOtp();
   const {
     register,
     handleSubmit,
     formState: { errors },
   } = useForm<PhoneInput>({ resolver: zodResolver(phoneSchema) });
 
-  async function onSubmit(values: PhoneInput) {
-    await requestOtp.mutateAsync(values.phone);
+  // /auth/otp requests the OTP itself on mount - requesting it again here too
+  // would send two independent, both-valid OTP codes for one login attempt.
+  function onSubmit(values: PhoneInput) {
     router.push(`/auth/otp?phone=${values.phone}`);
   }
 
@@ -86,12 +85,10 @@ export default function AuthPage() {
               />
             </div>
             {errors.phone && <p className="text-sm text-destructive">{errors.phone.message}</p>}
-            {requestOtp.isError && <p className="text-sm text-destructive">Something went wrong. Try again.</p>}
           </div>
 
-          <Button type="submit" size="lg" variant="glow" className="w-full" disabled={requestOtp.isPending}>
-            {requestOtp.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            {requestOtp.isPending ? "Sending code..." : "Continue"}
+          <Button type="submit" size="lg" variant="glow" className="w-full">
+            Continue
           </Button>
 
           <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">

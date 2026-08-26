@@ -18,3 +18,11 @@ export function useMarkNotificationRead() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.notifications }),
   });
 }
+
+export function useMarkAllNotificationsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: notificationService.markAllNotificationsRead,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.notifications }),
+  });
+}

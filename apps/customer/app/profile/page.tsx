@@ -10,6 +10,7 @@ import {
   LogOut,
   MapPin,
   Palette,
+  Pencil,
   QrCode,
   Wallet,
 } from "lucide-react";
@@ -26,12 +27,14 @@ import {
   DialogTitle,
   DialogTrigger,
   EmptyState,
+  Input,
+  Label,
   PageTransition,
   RatingStars,
   ThemeToggle,
   toast,
 } from "@trylo/ui";
-import { useCurrentUser, useLogout, usePaymentMethods, useSavedPlaces } from "@trylo/mock-data/hooks";
+import { useCompleteProfile, useCurrentUser, useLogout, usePaymentMethods, useSavedPlaces } from "@trylo/mock-data/hooks";
 import type { PaymentMethod, SavedPlaceLabel } from "@trylo/types";
 
 const PAYMENT_ICONS: Record<PaymentMethod["type"], React.ComponentType<{ size?: number; className?: string }>> = {
@@ -62,6 +65,28 @@ export default function ProfilePage() {
   const { data: savedPlaces } = useSavedPlaces();
   const { data: paymentMethods } = usePaymentMethods();
   const logout = useLogout();
+  const completeProfile = useCompleteProfile();
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editName, setEditName] = React.useState("");
+  const [editEmail, setEditEmail] = React.useState("");
+
+  function openEdit() {
+    setEditName(user?.name ?? "");
+    setEditEmail(user?.email ?? "");
+    setEditOpen(true);
+  }
+
+  async function handleSaveProfile() {
+    const name = editName.trim();
+    if (!name) return;
+    try {
+      await completeProfile.mutateAsync({ name, email: editEmail.trim() || undefined });
+      toast.success("Profile updated");
+      setEditOpen(false);
+    } catch {
+      toast.error("Couldn't save your profile. Try again.");
+    }
+  }
 
   function handleLogout() {
     logout.mutate(undefined, {
@@ -81,14 +106,54 @@ export default function ProfilePage() {
           {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.name} />}
           <AvatarFallback className="text-lg">{user?.name ? initials(user.name) : "?"}</AvatarFallback>
         </Avatar>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="truncate font-display text-lg font-semibold text-foreground">{user?.name || "Rider"}</p>
           <p className="text-sm text-muted-foreground">+91 {user?.phone}</p>
           <div className="mt-1.5">
             <RatingStars value={user?.rating ?? 5} size={14} />
           </div>
         </div>
+        <button
+          type="button"
+          onClick={openEdit}
+          aria-label="Edit profile"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-accent"
+        >
+          <Pencil size={14} />
+        </button>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit profile</DialogTitle>
+          </DialogHeader>
+          <div className="mt-2 flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-name">Name</Label>
+              <Input id="edit-name" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Your name" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-email">Email (optional)</Label>
+              <Input id="edit-email" type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="you@example.com" />
+            </div>
+          </div>
+          <div className="mt-4 flex gap-3">
+            <DialogClose asChild>
+              <Button variant="outline" className="flex-1">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              className="flex-1"
+              disabled={!editName.trim() || completeProfile.isPending}
+              onClick={handleSaveProfile}
+            >
+              {completeProfile.isPending ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Saved places */}
       <div className="mt-6">

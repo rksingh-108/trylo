@@ -98,6 +98,12 @@ export default function LiveRidePage() {
   const [cancelSheetOpen, setCancelSheetOpen] = React.useState(false);
   const [routeInfo, setRouteInfo] = React.useState<RouteInfo | null>(null);
   const cancelHandledRef = React.useRef(false);
+  const [seenMessageCount, setSeenMessageCount] = React.useState(0);
+  const hasUnreadMessages = chatMessages.length > seenMessageCount;
+
+  React.useEffect(() => {
+    if (chatOpen) setSeenMessageCount(chatMessages.length);
+  }, [chatOpen, chatMessages.length]);
 
   useLiveNotifications(activeRideId, "customer", (notification) => {
     toast.info(notification.title, { description: notification.body });
@@ -240,11 +246,14 @@ export default function LiveRidePage() {
                 <Button
                   variant="outline"
                   size="icon"
-                  className="h-9 w-9"
+                  className="relative h-9 w-9"
                   aria-label="Message driver"
                   onClick={() => setChatOpen(true)}
                 >
                   <MessageCircle size={15} />
+                  {hasUnreadMessages && (
+                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-destructive" />
+                  )}
                 </Button>
               </div>
             </div>

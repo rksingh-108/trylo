@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import type { FareBreakdown, VehicleType } from "@trylo/types";
 import { db } from "../db";
 import { requireAuth } from "../auth/middleware";
 import { haversineKm } from "../lib/geo";
@@ -9,6 +10,7 @@ import { emitRequestCleared, emitRideUpdated } from "../realtime/io";
 import { recordRideStatus } from "../lib/rideHistory";
 import { notifyRideEvent, notifyAllAdmins } from "../lib/notify";
 import { isLateCancellation, LATE_CANCELLATION_FEE_INR } from "../lib/cancellationPolicy";
+import { fareRates, promoCodes } from "../lib/fare";
 
 const router = Router();
 
@@ -39,7 +41,43 @@ const createRideSchema = z.object({
   drop: rideLocationSchema,
   vehicleType: z.enum(["bike", "auto", "cab"]),
   fare: fareBreakdownSchema,
+  promoCode: z.string().optional(),
 });
+
+/**
+ * Re-derives the expected fare from vehicleType/distanceKm/promoCode and checks
+ * the client-submitted breakdown against it, instead of trusting it outright -
+ * a bare `nonnegative()` zod check let a tampered request set an arbitrary
+ * (near-zero) fare that would later actually be charged. `computeFare()`'s surge
+ * flag is a per-call random draw (see lib/fare.ts), so this can't require exact
+ * equality with a fresh computeFare() call - it validates each component against
+ * the one deterministic value it can have (base/distance/time), the one formula
+ * surge can legitimately be (0, or exactly the active-surge amount), and that
+ * promoDiscount/total are arithmetically consistent with a real, currently-valid
+ * promo code - not an arbitrary reduction.
+ */
+function isValidFare(vehicleType: VehicleType, distanceKm: number, fare: FareBreakdown, promoCode?: string): boolean {
+  const rate = fareRates[vehicleType];
+  const durationMin = Math.max(3, Math.round((distanceKm / rate.avgSpeedKmph) * 60));
+  const expectedBase = rate.base;
+  const expectedDistance = Math.round(distanceKm * rate.perKm);
+  const expectedTime = Math.round(durationMin * rate.perMin);
+  if (fare.base !== expectedBase || fare.distance !== expectedDistance || fare.time !== expectedTime) return false;
+
+  const subtotal = expectedBase + expectedDistance + expectedTime;
+  const expectedActiveSurge = Math.round(subtotal * 0.15);
+  if (fare.surge !== 0 && fare.surge !== expectedActiveSurge) return false;
+
+  const promo = promoCode ? promoCodes.find((p) => p.code.toLowerCase() === promoCode.toLowerCase()) : undefined;
+  const subtotalWithSurge = subtotal + fare.surge;
+  const expectedPromoDiscount = promo
+    ? Math.min(Math.round(subtotalWithSurge * (promo.discountPercent / 100)), promo.maxDiscount)
+    : 0;
+  if (fare.promoDiscount !== expectedPromoDiscount) return false;
+
+  const expectedTotal = Math.max(0, subtotalWithSurge - fare.promoDiscount);
+  return fare.total === expectedTotal;
+}
 
 router.post("/", requireAuth("customer"), async (req, res) => {
   const parsed = createRideSchema.safeParse(req.body);
@@ -47,7 +85,7 @@ router.post("/", requireAuth("customer"), async (req, res) => {
     res.status(400).json({ error: "Invalid ride request" });
     return;
   }
-  const { pickup, drop, vehicleType, fare } = parsed.data;
+  const { pickup, drop, vehicleType, fare, promoCode } = parsed.data;
 
   const rider = await db.user.findUnique({ where: { id: req.auth!.id } });
   if (rider?.suspended) {
@@ -64,32 +102,49 @@ router.post("/", requireAuth("customer"), async (req, res) => {
   }
 
   const distanceKm = Math.max(0.8, haversineKm(pickup.point, drop.point));
+
+  if (!isValidFare(vehicleType, distanceKm, fare, promoCode)) {
+    res.status(400).json({ error: "Fare could not be verified - please go back and re-select your ride" });
+    return;
+  }
+
   const durationMin = Math.max(3, Math.round((distanceKm / 24) * 60));
   const otp = String(Math.floor(1000 + Math.random() * 8999));
 
-  const ride = await db.ride.create({
-    data: {
-      status: "requested",
-      vehicleType,
-      pickupAddress: pickup.address,
-      pickupLat: pickup.point.lat,
-      pickupLng: pickup.point.lng,
-      dropAddress: drop.address,
-      dropLat: drop.point.lat,
-      dropLng: drop.point.lng,
-      riderId: req.auth!.id,
-      otp,
-      fareBase: fare.base,
-      fareDistance: fare.distance,
-      fareTime: fare.time,
-      fareSurge: fare.surge,
-      farePromoDiscount: fare.promoDiscount,
-      fareTotal: fare.total,
-      distanceKm: Math.round(distanceKm * 10) / 10,
-      durationMin,
-    },
-    include: { driver: true, rider: true },
-  });
+  let ride;
+  try {
+    ride = await db.ride.create({
+      data: {
+        status: "requested",
+        vehicleType,
+        pickupAddress: pickup.address,
+        pickupLat: pickup.point.lat,
+        pickupLng: pickup.point.lng,
+        dropAddress: drop.address,
+        dropLat: drop.point.lat,
+        dropLng: drop.point.lng,
+        riderId: req.auth!.id,
+        otp,
+        fareBase: fare.base,
+        fareDistance: fare.distance,
+        fareTime: fare.time,
+        fareSurge: fare.surge,
+        farePromoDiscount: fare.promoDiscount,
+        fareTotal: fare.total,
+        distanceKm: Math.round(distanceKm * 10) / 10,
+        durationMin,
+      },
+      include: { driver: true, rider: true },
+    });
+  } catch (err) {
+    // A concurrent duplicate request (double-tap, two tabs) that raced past
+    // the existingActive check above and lost to the DB's partial unique
+    // index - report it the same way the check above would have.
+    const isDuplicateActiveRide = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+    if (!isDuplicateActiveRide) throw err;
+    res.status(409).json({ error: "You already have an active ride" });
+    return;
+  }
   await recordRideStatus(ride.id, "requested");
   await notifyRideEvent({
     rideId: ride.id,

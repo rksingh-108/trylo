@@ -130,6 +130,7 @@ export default function BookingPage() {
       drop,
       vehicleType: selected.vehicleType,
       fare: selected.fare,
+      promoCode: promoCode || undefined,
     });
     setActiveRideId(ride.id);
     router.push("/matching");

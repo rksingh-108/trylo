@@ -14,8 +14,17 @@ const periodSchema = z.enum(["daily", "weekly", "monthly"]);
 router.get("/", requireAuth("driver"), async (req, res) => {
   const parsedPeriod = periodSchema.safeParse(req.query.period);
   const period = parsedPeriod.success ? parsedPeriod.data : "daily";
-  const windowDays = period === "daily" ? 1 : period === "weekly" ? 7 : 30;
-  const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  // "daily" uses the same calendar-day boundary as the dashboard's "Today"
+  // figure (see /dashboard above) rather than a rolling 24h window, so the
+  // two screens can't disagree about what "today" covers.
+  let cutoff: Date;
+  if (period === "daily") {
+    cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+  } else {
+    const windowDays = period === "weekly" ? 7 : 30;
+    cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  }
 
   const earnings = await db.driverEarning.findMany({
     where: { driverId: req.auth!.id, createdAt: { gte: cutoff } },
@@ -23,12 +32,21 @@ router.get("/", requireAuth("driver"), async (req, res) => {
     orderBy: { createdAt: "desc" },
   });
 
+  const driver = await db.driver.findUnique({ where: { id: req.auth!.id } });
+  const onlineMinutes =
+    driver?.onlineSince && driver.onlineSince >= cutoff
+      ? Math.floor((Date.now() - driver.onlineSince.getTime()) / 60000)
+      : 0;
+
   res.json({
     period,
     totalEarnings: earnings.reduce((sum, e) => sum + e.amount, 0),
     totalRides: earnings.length,
     totalDistanceKm: Math.round(earnings.reduce((sum, e) => sum + e.ride.distanceKm, 0) * 10) / 10,
-    onlineHours: Math.round((earnings.length * 0.6 + Math.random() * 2) * 10) / 10,
+    // Real current online-session length within this window, not a random
+    // placeholder - a coarse but honest number (this app doesn't persist a
+    // full online/offline session history to sum across the whole window).
+    onlineHours: Math.round((onlineMinutes / 60) * 10) / 10,
     rides: earnings.map((e) => ({
       rideId: e.rideId,
       fare: e.amount,

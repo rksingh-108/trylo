@@ -21,7 +21,9 @@ export default function RideDetailClient() {
 
   if (!ride) return null;
 
-  const totalPaid = ride.fare.total + (ride.tip ?? 0);
+  // Only the fare is ever actually charged — tipping isn't wired up to any
+  // payment path yet, so it must never be folded into what "paid" claims.
+  const totalPaid = ride.fare.total;
 
   return (
     <PageTransition className="flex flex-1 flex-col px-5 pb-8 pt-5">
@@ -130,7 +132,7 @@ export default function RideDetailClient() {
         )}
         {Boolean(ride.tip) && (
           <div className="mt-2 flex justify-between text-sm">
-            <span className="text-muted-foreground">Tip</span>
+            <span className="text-muted-foreground">Tip (not yet supported — not charged)</span>
             <span className="font-mono text-foreground">₹{ride.tip}</span>
           </div>
         )}

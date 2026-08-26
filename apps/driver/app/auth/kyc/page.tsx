@@ -25,10 +25,15 @@ export default function KycPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingId(docId);
-    await uploadDoc.mutateAsync({ docId, fileName: file.name });
-    toast.success("Document uploaded");
-    setUploadingId(null);
-    e.target.value = "";
+    try {
+      await uploadDoc.mutateAsync({ docId, fileName: file.name });
+      toast.success("Document uploaded");
+    } catch {
+      toast.error("Upload failed. Please try again.");
+    } finally {
+      setUploadingId(null);
+      e.target.value = "";
+    }
   }
 
   const allUploaded = documents?.every((d) => d.status !== "not_uploaded") ?? false;

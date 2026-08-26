@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
-import { Button, OtpInput, PageTransition } from "@trylo/ui";
+import { Button, OtpInput, PageTransition, toast } from "@trylo/ui";
 import { useRequestDriverOtp, useVerifyDriverOtp } from "@trylo/mock-data/hooks";
 import { otpSchema } from "@/lib/validation";
 
@@ -32,7 +32,13 @@ function OtpForm() {
       return;
     }
     setError(null);
-    const result = await verifyOtp.mutateAsync({ phone, otp: code });
+    let result;
+    try {
+      result = await verifyOtp.mutateAsync({ phone, otp: code });
+    } catch {
+      toast.error("Something went wrong. Try again.");
+      return;
+    }
     if (!result.success || !result.driver) {
       setError(result.reason === "suspended" ? "Your account has been suspended." : "Incorrect code. Try again.");
       return;

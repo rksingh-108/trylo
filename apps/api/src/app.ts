@@ -1,3 +1,10 @@
+// Must be imported before any Router is created/used - it patches Express's
+// route-handler wiring so a rejected/thrown async handler reaches the error
+// middleware below via next(err), instead of the request just hanging forever
+// (Express 4 does not do this on its own; process.on("unhandledRejection") in
+// index.ts only stops the whole process from crashing, it doesn't answer the
+// specific in-flight request).
+import "express-async-errors";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";

@@ -1,11 +1,12 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, UserX } from "lucide-react";
 import {
   Badge,
   Button,
   Card,
+  EmptyState,
   Skeleton,
   Table,
   TableBody,
@@ -63,8 +64,23 @@ export default function AdminDriverDetailClient() {
     toast.success("Driver rejected");
   }
 
-  if (isLoading || !driver) {
+  if (isLoading) {
     return <Skeleton className="h-96 rounded-2xl" />;
+  }
+
+  if (!driver) {
+    return (
+      <EmptyState
+        icon={<UserX />}
+        title="Driver not found"
+        description="This driver doesn't exist or may have been removed."
+        action={
+          <Button variant="outline" onClick={() => router.push("/drivers")}>
+            Back to drivers
+          </Button>
+        }
+      />
+    );
   }
 
   const actionsPending = approve.isPending || reject.isPending || suspend.isPending || unsuspend.isPending;

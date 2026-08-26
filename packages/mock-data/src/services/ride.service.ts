@@ -6,6 +6,7 @@ export interface CreateRideInput {
   drop: RideLocation;
   vehicleType: VehicleType;
   fare: FareBreakdown;
+  promoCode?: string;
 }
 
 export async function createRide(input: CreateRideInput): Promise<Ride> {
