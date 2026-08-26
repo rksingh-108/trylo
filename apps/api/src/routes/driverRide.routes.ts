@@ -211,13 +211,11 @@ router.post("/rides/:rideId/cancel", requireAuth("driver"), async (req, res) => 
   });
 
   if (count === 0) {
-    // Lost a race with a concurrent status change (e.g. the rider just verified
-    // OTP and started the trip) - re-check rather than trusting the stale read.
-    const current = await db.ride.findFirst({ where: { id: existing.id }, include: { driver: true, rider: true } });
-    if (current?.status === "cancelled") {
-      res.json(serializeRide(current));
-      return;
-    }
+    // Matches the original (pre-CAS) behavior exactly: this never treats an
+    // already-cancelled ride as a successful no-op, unlike the customer-cancel
+    // endpoint - a repeat driver cancel always 409s, whether that's because the
+    // ride was already cancelled or because it lost a race with a concurrent
+    // status change (e.g. the rider just verified OTP and started the trip).
     res.status(409).json({ error: "This ride can no longer be cancelled" });
     return;
   }
