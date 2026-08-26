@@ -1,4 +1,4 @@
-import { VehicleType } from "@prisma/client";
+import { RideStatus, VehicleType } from "@prisma/client";
 import { db } from "../db";
 import { haversineKm } from "../lib/geo";
 import { serializeRide } from "../lib/serialize";
@@ -212,6 +212,76 @@ async function offerUnassignedRides() {
   }
 }
 
+// A ride that's been sitting in "arriving"/"arrived"/"in_progress" far longer
+// than any real local ride ever would (a driver's phone died, the app was
+// force-closed, or a test session was simply abandoned mid-ride) would
+// otherwise stay active forever - nothing else ever moves a ride out of these
+// statuses on its own. These windows are deliberately wide (hours, not
+// minutes) so a genuinely long real ride is never touched; they only catch
+// sessions that are unambiguously dead. Measured from timestamps the schema
+// already has (acceptedAt/arrivedAt/startedAt), so no schema change needed.
+const STALE_ARRIVING_MS = 3 * 60 * 60_000; // 3h since accepted, driver still hasn't arrived
+const STALE_ARRIVED_MS = 3 * 60 * 60_000; // 3h waiting at pickup, OTP never verified
+const STALE_IN_PROGRESS_MS = 8 * 60 * 60_000; // 8h since trip started, never ended
+
+const STALE_RIDE_REASON = "Automatically cancelled after an extended period with no activity.";
+
+/**
+ * Atomically cancels one specific ride, guarded on it still being in the
+ * exact status this caller observed - if it changed in the meantime (the
+ * driver just ended it, the rider just cancelled it, etc.), this is a no-op
+ * rather than overwriting a newer, real state. Never marks anything
+ * "completed" - only ever "cancelled", so this path can never trigger a fare
+ * charge or driver earning for an abandoned ride.
+ */
+async function cancelStaleRide(rideId: string, observedStatus: RideStatus) {
+  const { count } = await db.ride.updateMany({
+    where: { id: rideId, status: observedStatus },
+    data: { status: "cancelled", cancelledAt: new Date(), cancelReason: STALE_RIDE_REASON, cancelledBy: "admin" },
+  });
+  if (count === 0) return;
+
+  const updated = await db.ride.findUniqueOrThrow({
+    where: { id: rideId },
+    include: { driver: true, rider: true },
+  });
+  await recordRideStatus(rideId, "cancelled", STALE_RIDE_REASON);
+  emitRideUpdated(rideId, serializeRide(updated));
+  await notifyRideEvent({
+    rideId,
+    ownerId: updated.riderId,
+    ownerRole: "customer",
+    title: "Ride cancelled",
+    body: STALE_RIDE_REASON,
+  });
+  if (updated.driverId) {
+    await notifyRideEvent({
+      rideId,
+      ownerId: updated.driverId,
+      ownerRole: "driver",
+      title: "Ride cancelled",
+      body: STALE_RIDE_REASON,
+    });
+  }
+}
+
+async function expireStaleActiveRides() {
+  const now = Date.now();
+  const stale = await db.ride.findMany({
+    where: {
+      OR: [
+        { status: "arriving", acceptedAt: { lt: new Date(now - STALE_ARRIVING_MS) } },
+        { status: "arrived", arrivedAt: { lt: new Date(now - STALE_ARRIVED_MS) } },
+        { status: "in_progress", startedAt: { lt: new Date(now - STALE_IN_PROGRESS_MS) } },
+      ],
+    },
+    select: { id: true, status: true },
+  });
+  for (const ride of stale) {
+    await cancelStaleRide(ride.id, ride.status);
+  }
+}
+
 let running = false;
 
 export function startMatchingLoop() {
@@ -221,6 +291,7 @@ export function startMatchingLoop() {
     try {
       await expireStaleOffers();
       await offerUnassignedRides();
+      await expireStaleActiveRides();
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[matching loop] error", err);
