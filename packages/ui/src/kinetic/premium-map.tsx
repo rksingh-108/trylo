@@ -5,7 +5,8 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { renderToStaticMarkup } from "react-dom/server";
 import { motion } from "framer-motion";
-import { LocateFixed, MapPin as MapPinIcon, Navigation } from "lucide-react";
+import { Bike, Car, CarTaxiFront, LocateFixed, MapPin as MapPinIcon, Navigation } from "lucide-react";
+import type { VehicleType } from "@trylo/types";
 import { cn } from "../lib/cn";
 
 export interface MapGeoPoint {
@@ -40,6 +41,8 @@ export interface PremiumMapProps {
   followLive?: boolean;
   /** Shows a subtle secondary pulse ring around the live marker — e.g. while the driver is waiting at pickup. */
   liveMarkerWaiting?: boolean;
+  /** The driver's vehicle type, when known - swaps the live marker's icon (bike/auto/cab) to match instead of a generic arrow. */
+  liveMarkerVehicleType?: VehicleType;
   onRouteInfo?: (info: RouteInfo) => void;
   /** Fires whenever the camera settles on a new center — panning, `flyTo`, or the current-location button. Used by the map location picker. */
   onCenterChange?: (point: MapGeoPoint) => void;
@@ -242,8 +245,20 @@ function pinHtml(tone: "pickup" | "drop"): string {
   `;
 }
 
-function liveDotHtml(waiting: boolean): string {
-  const icon = renderToStaticMarkup(<Navigation size={11} color="#fff" fill="#fff" />);
+// Same icon-per-vehicle-type mapping already used for vehicle selection
+// elsewhere (e.g. apps/customer/app/booking/page.tsx's VEHICLE_ICONS) - keeps
+// the live marker visually consistent with how the vehicle type is shown
+// everywhere else. Falls back to a plain directional arrow when the vehicle
+// type isn't known yet (e.g. before driver data has loaded).
+const LIVE_MARKER_ICONS: Record<VehicleType, React.ComponentType<{ size?: number; color?: string; fill?: string }>> = {
+  bike: Bike,
+  auto: CarTaxiFront,
+  cab: Car,
+};
+
+function liveDotHtml(waiting: boolean, vehicleType?: VehicleType): string {
+  const Icon = (vehicleType && LIVE_MARKER_ICONS[vehicleType]) || Navigation;
+  const icon = renderToStaticMarkup(<Icon size={11} color="#fff" fill="#fff" />);
   const waitingRing = waiting
     ? `<span class="trylo-pulse-ring trylo-pulse-ring-slow" style="position:absolute;inset:-16px;border-radius:9999px;background:hsl(var(--primary) / 0.3)"></span>`
     : "";
@@ -405,6 +420,7 @@ export function PremiumMap({
   showCurrentLocationButton = true,
   followLive = false,
   liveMarkerWaiting = false,
+  liveMarkerVehicleType,
   onRouteInfo,
   onCenterChange,
   children,
@@ -476,10 +492,13 @@ export function PremiumMap({
 
   useMapMarker(map, ready, pickup, pinHtml("pickup"), "bottom");
   useMapMarker(map, ready, drop, pinHtml("drop"), "bottom");
-  useMapMarker(map, ready, smoothLive, liveDotHtml(liveMarkerWaiting), "center", {
+  useMapMarker(map, ready, smoothLive, liveDotHtml(liveMarkerWaiting, liveMarkerVehicleType), "center", {
     rotation: heading,
     rotationAlignment: "map",
-    variantKey: liveMarkerWaiting ? "waiting" : "normal",
+    // vehicleType is included so the marker is torn down and rebuilt with the
+    // right icon once it resolves (e.g. arrives with the driver data a beat
+    // after the map itself mounts), not stuck with whatever it started as.
+    variantKey: `${liveMarkerVehicleType ?? "unknown"}-${liveMarkerWaiting ? "waiting" : "normal"}`,
   });
 
   // Route + ETA via OSRM, drawn as a GeoJSON line layer that fades in smoothly.
