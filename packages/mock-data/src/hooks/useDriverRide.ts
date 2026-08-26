@@ -145,12 +145,20 @@ export function useDriverRideHistory() {
   });
 }
 
+// Also used by PremiumMap (packages/ui/src/kinetic/premium-map.tsx) to size
+// the live marker's glide duration - keep the two in sync if this changes,
+// so the marker's animation finishes roughly as the next fix arrives instead
+// of snapping-then-freezing (too short) or still gliding when overtaken by a
+// newer fix (too long).
+export const LIVE_LOCATION_REPORT_INTERVAL_MS = 3000;
+
 /**
  * Watches the device's real GPS position while `enabled`, returning it immediately
  * for local map display (no need to wait on a server round-trip to see your own
- * position move) and pushing it to the backend at most once every 5s so the rider
- * can see the driver move live on their own map via the `driver:location` socket
- * event. Returns null if geolocation is unavailable/denied.
+ * position move) and pushing it to the backend at most once every
+ * LIVE_LOCATION_REPORT_INTERVAL_MS so the rider can see the driver move live on
+ * their own map via the `driver:location` socket event. Returns null if
+ * geolocation is unavailable/denied.
  *
  * Also carries `coords.heading` (the device's own GPS/compass-fused bearing,
  * when the browser reports one) alongside the position, both locally and to
@@ -171,7 +179,7 @@ export function useReportLiveLocation(enabled: boolean) {
         const next = { lat: pos.coords.latitude, lng: pos.coords.longitude, heading };
         setPosition(next);
         const now = Date.now();
-        if (now - lastSentRef.current > 5000) {
+        if (now - lastSentRef.current > LIVE_LOCATION_REPORT_INTERVAL_MS) {
           lastSentRef.current = now;
           driverRideService.updateDriverLocation(next.lat, next.lng, heading ?? undefined).catch(() => {});
         }
@@ -179,7 +187,7 @@ export function useReportLiveLocation(enabled: boolean) {
       () => {
         // permission denied / unavailable — caller falls back to the last known DB location
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, [enabled]);

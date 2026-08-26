@@ -75,6 +75,13 @@ const ROUTE_SOURCE_ID = "trylo-route";
 const ROUTE_LAYER_ID = "trylo-route-line";
 const ROUTE_FADE_MS = 500;
 const FOLLOW_EASE_MS = 1200;
+// The live marker's position/heading glide duration - kept just under
+// LIVE_LOCATION_REPORT_INTERVAL_MS (packages/mock-data/src/hooks/useDriverRide.ts,
+// currently 3000ms) so it finishes gliding just before the next fix arrives,
+// instead of the marker snapping then sitting frozen for most of the interval
+// (too short a duration) or still easing toward a stale target when a newer
+// fix overtakes it (too long a duration).
+const LIVE_MARKER_GLIDE_MS = 2800;
 const FOLLOW_RESUME_DELAY_MS = 6000;
 const MIN_HEADING_DISTANCE_M = 3;
 
@@ -411,8 +418,8 @@ export function PremiumMap({
   const followPausedRef = React.useRef(false);
   const resumeTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const smoothLive = useSmoothPosition(liveMarker);
-  const heading = useHeading(liveMarker, liveMarkerHeading);
+  const smoothLive = useSmoothPosition(liveMarker, LIVE_MARKER_GLIDE_MS);
+  const heading = useHeading(liveMarker, liveMarkerHeading, LIVE_MARKER_GLIDE_MS);
   const mapCenter = center ?? pickup ?? drop ?? DEFAULT_CENTER;
   const initialCenterRef = React.useRef(mapCenter);
   const readyRef = React.useRef(false);

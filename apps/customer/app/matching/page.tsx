@@ -76,6 +76,10 @@ export default function MatchingPage() {
 
   const isSearching = !ride || ride.status === "requested";
   const driver = ride?.driver;
+  // Matches the server's CANCELLABLE_STATUSES (customerRide.routes.ts) - once
+  // the driver has arrived/started the trip, cancelling is no longer offered
+  // here (or anywhere on the customer side) at all.
+  const canCancel = ride?.status === "requested" || ride?.status === "arriving";
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -206,6 +210,20 @@ export default function MatchingPage() {
                 Track ride
               </Button>
             </motion.div>
+
+            {canCancel && (
+              <motion.div variants={matchedItem}>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="w-full text-destructive"
+                  onClick={() => setCancelSheetOpen(true)}
+                  disabled={cancelRide.isPending}
+                >
+                  Cancel ride
+                </Button>
+              </motion.div>
+            )}
           </motion.div>
         ) : null}
       </AnimatePresence>
