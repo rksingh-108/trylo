@@ -70,12 +70,12 @@ export function useRideStatus(rideId: string | null) {
  * (a coarser, DB-persisted value) until then.
  */
 export function useDriverLiveLocation(rideId: string | null) {
-  const [location, setLocation] = React.useState<{ lat: number; lng: number } | null>(null);
+  const [location, setLocation] = React.useState<{ lat: number; lng: number; heading?: number | null } | null>(null);
 
   React.useEffect(() => {
     setLocation(null);
     if (!rideId) return;
-    const unsubscribe = onDriverLocation<{ lat: number; lng: number }>((loc) => setLocation(loc));
+    const unsubscribe = onDriverLocation<{ lat: number; lng: number; heading?: number | null }>((loc) => setLocation(loc));
     return () => unsubscribe();
   }, [rideId]);
 

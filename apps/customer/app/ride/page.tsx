@@ -168,6 +168,7 @@ export default function LiveRidePage() {
           pickup={ride.pickup.point}
           drop={ride.drop.point}
           liveMarker={liveDriverLocation ?? driver?.location}
+          liveMarkerHeading={liveDriverLocation?.heading}
           showRoute
           followLive={followLive}
           liveMarkerWaiting={isArrived}

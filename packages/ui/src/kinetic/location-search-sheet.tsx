@@ -17,8 +17,10 @@ export interface LocationSearchSheetProps {
   onDropSelect: (place: PlaceResult) => void;
   /** Which field should be focused when the sheet opens. */
   autoFocus?: "pickup" | "drop";
-  onUseCurrentLocation: () => void;
-  onChooseOnMap: () => void;
+  /** Called with whichever field (pickup/drop) is currently active, so the result applies to the right one. */
+  onUseCurrentLocation: (field: "pickup" | "drop") => void;
+  /** Called with whichever field (pickup/drop) is currently active, so the result applies to the right one. */
+  onChooseOnMap: (field: "pickup" | "drop") => void;
   usingCurrentLocation?: boolean;
   title?: string;
   /** Extra content rendered below the two search fields — e.g. saved places. */
@@ -48,6 +50,9 @@ export function LocationSearchSheet({
   // field without picking one, and (being absolutely positioned right below
   // the input) visually overlap and intercept clicks meant for it.
   const [activeField, setActiveField] = React.useState<"pickup" | "drop" | null>(null);
+  // Falls back to whichever field the sheet opened focused on if neither
+  // input has been explicitly focused yet this time it's open.
+  const targetField = activeField ?? autoFocus ?? "pickup";
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -89,17 +94,17 @@ export function LocationSearchSheet({
         <div className="mt-3 flex gap-2">
           <button
             type="button"
-            onClick={onUseCurrentLocation}
+            onClick={() => onUseCurrentLocation(targetField)}
             className="flex flex-1 items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2.5 text-left transition-colors hover:bg-accent"
           >
             <LocateFixed size={16} className={cn("shrink-0 text-primary", usingCurrentLocation && "animate-pulse")} />
             <span className="truncate text-xs font-medium text-foreground">
-              {usingCurrentLocation ? "Locating…" : "Current location"}
+              {usingCurrentLocation ? "Locating…" : targetField === "drop" ? "Current location as destination" : "Current location"}
             </span>
           </button>
           <button
             type="button"
-            onClick={onChooseOnMap}
+            onClick={() => onChooseOnMap(targetField)}
             className="flex flex-1 items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2.5 text-left transition-colors hover:bg-accent"
           >
             <MapIcon size={16} className="shrink-0 text-primary" />

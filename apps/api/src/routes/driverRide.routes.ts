@@ -39,7 +39,12 @@ router.post("/status", requireAuth("driver"), async (req, res) => {
   res.json(serializeDriver(driver));
 });
 
-const locationSchema = z.object({ lat: z.number(), lng: z.number() });
+// `heading` (the device's own GPS/compass-fused bearing, in degrees) is
+// purely a live broadcast value - it's relayed straight through to the ride
+// room so the rider's map can rotate the driver's marker to face the actual
+// direction of travel, never persisted on the Driver row (nothing besides
+// this live broadcast needs it, and it'd otherwise need a schema migration).
+const locationSchema = z.object({ lat: z.number(), lng: z.number(), heading: z.number().optional() });
 
 router.post("/location", requireAuth("driver"), async (req, res) => {
   const parsed = locationSchema.safeParse(req.body);
@@ -57,7 +62,7 @@ router.post("/location", requireAuth("driver"), async (req, res) => {
   });
 
   if (activeRide) {
-    emitDriverLocation(activeRide.id, { lat: parsed.data.lat, lng: parsed.data.lng });
+    emitDriverLocation(activeRide.id, { lat: parsed.data.lat, lng: parsed.data.lng, heading: parsed.data.heading ?? null });
 
     if (activeRide.status === "arriving") {
       const distanceMeters =

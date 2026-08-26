@@ -48,6 +48,7 @@ export default function BookingPage() {
   const [editPickupQuery, setEditPickupQuery] = React.useState("");
   const [editDropQuery, setEditDropQuery] = React.useState("");
   const [mapPickerOpen, setMapPickerOpen] = React.useState(false);
+  const [mapPickerField, setMapPickerField] = React.useState<"pickup" | "drop">("pickup");
   const [locatingPickup, setLocatingPickup] = React.useState(false);
 
   React.useEffect(() => {
@@ -103,23 +104,32 @@ export default function BookingPage() {
     setEditSheetOpen(false);
   }
 
-  async function handleUseCurrentLocation() {
+  async function handleUseCurrentLocation(field: "pickup" | "drop") {
     setLocatingPickup(true);
     const real = await getCurrentLocationWithAddress();
     setLocatingPickup(false);
-    if (real) {
+    if (!real) return;
+    if (field === "drop") {
+      setDrop(real);
+      setEditDropQuery(real.address);
+    } else {
       setPickup(real);
       setEditPickupQuery(real.address);
     }
   }
 
-  function handleChooseOnMap() {
+  function handleChooseOnMap(field: "pickup" | "drop") {
+    setMapPickerField(field);
     setEditSheetOpen(false);
     setMapPickerOpen(true);
   }
 
   function handleMapPickerConfirm(result: { address: string; point: GeoPoint }) {
-    setPickup(result);
+    if (mapPickerField === "drop") {
+      setDrop(result);
+    } else {
+      setPickup(result);
+    }
     setMapPickerOpen(false);
   }
 
@@ -296,8 +306,8 @@ export default function BookingPage() {
 
       {mapPickerOpen && (
         <MapLocationPicker
-          initialPoint={pickup.point}
-          title="Move the map to set your pickup point"
+          initialPoint={(mapPickerField === "drop" ? drop.point : pickup.point)}
+          title={mapPickerField === "drop" ? "Move the map to set your destination" : "Move the map to set your pickup point"}
           onConfirm={handleMapPickerConfirm}
           onClose={() => setMapPickerOpen(false)}
         />

@@ -135,7 +135,7 @@ export function emitRequestCleared(driverId: string) {
   io?.to(`driver:${driverId}`).emit("request_cleared");
 }
 
-export function emitDriverLocation(rideId: string, location: { lat: number; lng: number }) {
+export function emitDriverLocation(rideId: string, location: { lat: number; lng: number; heading?: number | null }) {
   io?.to(`ride:${rideId}`).emit("driver:location", location);
 }
 

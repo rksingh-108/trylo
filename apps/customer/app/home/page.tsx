@@ -51,6 +51,7 @@ export default function HomePage() {
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [sheetFocus, setSheetFocus] = React.useState<"pickup" | "drop">("drop");
   const [mapPickerOpen, setMapPickerOpen] = React.useState(false);
+  const [mapPickerField, setMapPickerField] = React.useState<"pickup" | "drop">("pickup");
   const [locatingPickup, setLocatingPickup] = React.useState(false);
 
   const { data: savedPlaces, isLoading: savedPlacesLoading } = useSavedPlaces();
@@ -95,24 +96,34 @@ export default function HomePage() {
     setPickupQuery(place.description);
   }
 
-  async function handleUseCurrentLocation() {
+  async function handleUseCurrentLocation(field: "pickup" | "drop") {
     setLocatingPickup(true);
     const real = await getCurrentLocationWithAddress();
     setLocatingPickup(false);
-    if (real) {
+    if (!real) return;
+    if (field === "drop") {
+      setDrop(real);
+      setDropQuery(real.address);
+    } else {
       setPickup(real);
       setPickupQuery(real.address);
     }
   }
 
-  function handleChooseOnMap() {
+  function handleChooseOnMap(field: "pickup" | "drop") {
+    setMapPickerField(field);
     setSheetOpen(false);
     setMapPickerOpen(true);
   }
 
   function handleMapPickerConfirm(result: { address: string; point: GeoPoint }) {
-    setPickup(result);
-    setPickupQuery(result.address);
+    if (mapPickerField === "drop") {
+      setDrop(result);
+      setDropQuery(result.address);
+    } else {
+      setPickup(result);
+      setPickupQuery(result.address);
+    }
     setMapPickerOpen(false);
   }
 
@@ -265,8 +276,8 @@ export default function HomePage() {
 
       {mapPickerOpen && (
         <MapLocationPicker
-          initialPoint={pickup?.point ?? mapCenter}
-          title="Move the map to set your pickup point"
+          initialPoint={(mapPickerField === "drop" ? drop?.point : pickup?.point) ?? mapCenter}
+          title={mapPickerField === "drop" ? "Move the map to set your destination" : "Move the map to set your pickup point"}
           onConfirm={handleMapPickerConfirm}
           onClose={() => setMapPickerOpen(false)}
         />

@@ -24,6 +24,8 @@ export interface PremiumMapProps {
   drop?: MapGeoPoint;
   /** A moving marker, e.g. the driver's live position. Animates smoothly between updates. */
   liveMarker?: MapGeoPoint;
+  /** The device-reported GPS/compass heading (degrees) for `liveMarker`, when known - preferred over computing a bearing from successive fixes. */
+  liveMarkerHeading?: number | null;
   showRoute?: boolean;
   /** Fallback center when no pickup/drop is set yet. */
   center?: MapGeoPoint;
@@ -157,8 +159,16 @@ function useSmoothPosition(target: MapGeoPoint | undefined, durationMs = 900) {
   return pos;
 }
 
-/** Derives a smoothed heading (degrees) from successive raw fixes of a moving point. */
-function useHeading(rawTarget: MapGeoPoint | undefined, durationMs = 900) {
+/**
+ * Derives a smoothed heading (degrees) for a moving point. Prefers the
+ * device's own GPS/compass-fused `coords.heading` when the caller has one
+ * (reliable immediately, even at low speed or through brief stops) - only
+ * falls back to computing a bearing from successive raw fixes when no device
+ * heading is available (e.g. the browser/device doesn't report one). The
+ * pure fixes-only fallback needs two fixes at least MIN_HEADING_DISTANCE_M
+ * apart to avoid GPS jitter producing a spurious heading from noise.
+ */
+function useHeading(rawTarget: MapGeoPoint | undefined, deviceHeading?: number | null, durationMs = 900) {
   const [rotation, setRotation] = React.useState(0);
   const prevRawRef = React.useRef<MapGeoPoint | undefined>(undefined);
   const currentRotRef = React.useRef(0);
@@ -168,10 +178,16 @@ function useHeading(rawTarget: MapGeoPoint | undefined, durationMs = 900) {
     if (!rawTarget) return;
     const prev = prevRawRef.current;
     prevRawRef.current = rawTarget;
-    if (!prev) return;
-    if (distanceMeters(prev, rawTarget) < MIN_HEADING_DISTANCE_M) return;
 
-    const targetBearing = bearingBetween(prev, rawTarget);
+    let targetBearing: number;
+    if (typeof deviceHeading === "number" && Number.isFinite(deviceHeading)) {
+      targetBearing = deviceHeading;
+    } else {
+      if (!prev) return;
+      if (distanceMeters(prev, rawTarget) < MIN_HEADING_DISTANCE_M) return;
+      targetBearing = bearingBetween(prev, rawTarget);
+    }
+
     const startBearing = currentRotRef.current;
     const startTime = performance.now();
     if (frame.current) cancelAnimationFrame(frame.current);
@@ -189,7 +205,7 @@ function useHeading(rawTarget: MapGeoPoint | undefined, durationMs = 900) {
       if (frame.current) cancelAnimationFrame(frame.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawTarget?.lat, rawTarget?.lng, durationMs]);
+  }, [rawTarget?.lat, rawTarget?.lng, deviceHeading, durationMs]);
 
   return rotation;
 }
@@ -374,6 +390,7 @@ export function PremiumMap({
   pickup,
   drop,
   liveMarker,
+  liveMarkerHeading,
   showRoute,
   center,
   zoom = 15,
@@ -395,7 +412,7 @@ export function PremiumMap({
   const resumeTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const smoothLive = useSmoothPosition(liveMarker);
-  const heading = useHeading(liveMarker);
+  const heading = useHeading(liveMarker, liveMarkerHeading);
   const mapCenter = center ?? pickup ?? drop ?? DEFAULT_CENTER;
   const initialCenterRef = React.useRef(mapCenter);
   const readyRef = React.useRef(false);

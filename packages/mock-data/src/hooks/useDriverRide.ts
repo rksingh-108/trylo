@@ -151,21 +151,29 @@ export function useDriverRideHistory() {
  * position move) and pushing it to the backend at most once every 5s so the rider
  * can see the driver move live on their own map via the `driver:location` socket
  * event. Returns null if geolocation is unavailable/denied.
+ *
+ * Also carries `coords.heading` (the device's own GPS/compass-fused bearing,
+ * when the browser reports one) alongside the position, both locally and to
+ * the backend - this is what lets the live marker actually rotate to face the
+ * direction of travel; without it, the map falls back to estimating a
+ * heading purely from successive position fixes, which is far less reliable
+ * at low speed or through brief stops.
  */
 export function useReportLiveLocation(enabled: boolean) {
-  const [position, setPosition] = React.useState<{ lat: number; lng: number } | null>(null);
+  const [position, setPosition] = React.useState<{ lat: number; lng: number; heading: number | null } | null>(null);
   const lastSentRef = React.useRef(0);
 
   React.useEffect(() => {
     if (!enabled || typeof navigator === "undefined" || !navigator.geolocation) return;
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        const heading = typeof pos.coords.heading === "number" && Number.isFinite(pos.coords.heading) ? pos.coords.heading : null;
+        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude, heading };
         setPosition(next);
         const now = Date.now();
         if (now - lastSentRef.current > 5000) {
           lastSentRef.current = now;
-          driverRideService.updateDriverLocation(next.lat, next.lng).catch(() => {});
+          driverRideService.updateDriverLocation(next.lat, next.lng, heading ?? undefined).catch(() => {});
         }
       },
       () => {

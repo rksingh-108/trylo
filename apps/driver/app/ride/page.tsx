@@ -169,6 +169,7 @@ export default function ActiveRidePage() {
           pickup={ride.pickup.point}
           drop={ride.drop.point}
           liveMarker={liveGpsLocation ?? ride.driver?.location}
+          liveMarkerHeading={liveGpsLocation?.heading}
           showRoute
           followLive={isArriving || isArrived || isInProgress}
           liveMarkerWaiting={isArrived}
