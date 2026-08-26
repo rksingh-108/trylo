@@ -227,7 +227,14 @@ export default function LiveRidePage() {
                 </div>
               </div>
               <div className="flex shrink-0 gap-2">
-                <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Call driver">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  aria-label="Calling is not available yet"
+                  title="Calling is not available yet"
+                  disabled
+                >
                   <Phone size={15} />
                 </Button>
                 <Button

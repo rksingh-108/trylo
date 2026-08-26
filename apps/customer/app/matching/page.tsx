@@ -13,8 +13,10 @@ import {
   CUSTOMER_CANCEL_REASONS,
   FareBadge,
   RatingStars,
+  RideChatSheet,
 } from "@trylo/ui";
-import { useCancelRide, useRideStatus } from "@trylo/mock-data/hooks";
+import { getRideMessages } from "@trylo/mock-data";
+import { useCancelRide, useRideChat, useRideStatus } from "@trylo/mock-data/hooks";
 import { useBookingStore } from "@/lib/store";
 
 function initials(name: string) {
@@ -48,7 +50,9 @@ export default function MatchingPage() {
 
   const { data: ride } = useRideStatus(activeRideId);
   const cancelRide = useCancelRide();
+  const { messages: chatMessages, send: sendChatMessage } = useRideChat(activeRideId, getRideMessages);
   const [cancelSheetOpen, setCancelSheetOpen] = React.useState(false);
+  const [chatOpen, setChatOpen] = React.useState(false);
 
   async function handleCancel(reason: string) {
     if (!activeRideId) return;
@@ -169,10 +173,23 @@ export default function MatchingPage() {
             </motion.div>
 
             <motion.div variants={matchedItem} className="flex gap-3">
-              <Button variant="outline" size="icon" className="shrink-0" aria-label="Call driver">
+              <Button
+                variant="outline"
+                size="icon"
+                className="shrink-0"
+                aria-label="Calling is not available yet"
+                title="Calling is not available yet"
+                disabled
+              >
                 <Phone size={18} />
               </Button>
-              <Button variant="outline" size="icon" className="shrink-0" aria-label="Message driver">
+              <Button
+                variant="outline"
+                size="icon"
+                className="shrink-0"
+                aria-label="Message driver"
+                onClick={() => setChatOpen(true)}
+              >
                 <MessageCircle size={18} />
               </Button>
               <Button variant="glow" size="lg" className="flex-1" onClick={() => router.push("/ride")}>
@@ -189,6 +206,15 @@ export default function MatchingPage() {
         reasons={CUSTOMER_CANCEL_REASONS}
         onConfirm={handleCancel}
         isPending={cancelRide.isPending}
+      />
+
+      <RideChatSheet
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        messages={chatMessages}
+        currentRole="customer"
+        otherPartyLabel={driver?.name ?? "Driver"}
+        onSend={sendChatMessage}
       />
     </div>
   );

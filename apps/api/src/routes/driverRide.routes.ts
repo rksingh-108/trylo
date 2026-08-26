@@ -133,16 +133,26 @@ router.post("/requests/:rideId/accept", requireAuth("driver"), async (req, res) 
     return;
   }
 
-  const ride = await db.ride.findFirst({
+  const { count } = await db.ride.updateMany({
     where: { id: req.params.rideId, driverId: req.auth!.id, status: "requested" },
+    data: { status: "arriving", acceptedAt: new Date(), offerExpiresAt: null },
   });
-  if (!ride) {
-    res.json(null);
+
+  if (count === 0) {
+    // Already accepted by this same driver (a retried request after the first
+    // response was lost) is idempotent; anything else - offer expired/reassigned
+    // by the matching loop, or the ride was cancelled in the meantime - means
+    // there's genuinely nothing left to accept.
+    const current = await db.ride.findFirst({
+      where: { id: req.params.rideId, driverId: req.auth!.id, status: "arriving" },
+      include: { driver: true, rider: true },
+    });
+    res.json(current ? serializeRide(current) : null);
     return;
   }
-  const updated = await db.ride.update({
-    where: { id: ride.id },
-    data: { status: "arriving", acceptedAt: new Date(), offerExpiresAt: null },
+
+  const updated = await db.ride.findUniqueOrThrow({
+    where: { id: req.params.rideId },
     include: { driver: true, rider: true },
   });
   await db.driver.update({ where: { id: req.auth!.id }, data: { acceptedCount: { increment: 1 } } });
@@ -187,24 +197,33 @@ const driverCancelSchema = z.object({ reason: z.string().default("Cancelled by d
 // trip rather than cancel it here.
 router.post("/rides/:rideId/cancel", requireAuth("driver"), async (req, res) => {
   const parsed = driverCancelSchema.safeParse(req.body ?? {});
-  const ride = await db.ride.findFirst({ where: { id: req.params.rideId, driverId: req.auth!.id } });
-  if (!ride) {
+  const reason = parsed.success ? parsed.data.reason : "Cancelled by driver";
+
+  const existing = await db.ride.findFirst({ where: { id: req.params.rideId, driverId: req.auth!.id } });
+  if (!existing) {
     res.json(null);
     return;
   }
-  if (ride.status !== "arriving" && ride.status !== "arrived") {
+
+  const { count } = await db.ride.updateMany({
+    where: { id: req.params.rideId, driverId: req.auth!.id, status: { in: ["arriving", "arrived"] } },
+    data: { status: "cancelled", cancelledAt: new Date(), cancelReason: reason, cancelledBy: "driver" },
+  });
+
+  if (count === 0) {
+    // Lost a race with a concurrent status change (e.g. the rider just verified
+    // OTP and started the trip) - re-check rather than trusting the stale read.
+    const current = await db.ride.findFirst({ where: { id: existing.id }, include: { driver: true, rider: true } });
+    if (current?.status === "cancelled") {
+      res.json(serializeRide(current));
+      return;
+    }
     res.status(409).json({ error: "This ride can no longer be cancelled" });
     return;
   }
 
-  const updated = await db.ride.update({
-    where: { id: ride.id },
-    data: {
-      status: "cancelled",
-      cancelledAt: new Date(),
-      cancelReason: parsed.success ? parsed.data.reason : "Cancelled by driver",
-      cancelledBy: "driver",
-    },
+  const updated = await db.ride.findUniqueOrThrow({
+    where: { id: existing.id },
     include: { driver: true, rider: true },
   });
   await recordRideStatus(updated.id, "cancelled", updated.cancelReason ?? undefined);
@@ -241,9 +260,22 @@ router.post("/rides/:rideId/verify-otp", requireAuth("driver"), async (req, res)
     return;
   }
 
-  const updated = await db.ride.update({
-    where: { id: ride.id },
+  const { count } = await db.ride.updateMany({
+    where: { id: ride.id, driverId: req.auth!.id, status: { in: ["arriving", "arrived"] } },
     data: { status: "in_progress", startedAt: new Date() },
+  });
+
+  if (count === 0) {
+    // Lost a race with a concurrent status change (e.g. a cancel that landed
+    // between the read above and this write) - report the ride's actual
+    // current state instead of claiming the OTP verify succeeded.
+    const current = await db.ride.findUniqueOrThrow({ where: { id: ride.id }, include: { driver: true, rider: true } });
+    res.json({ success: false, ride: serializeRide(current) });
+    return;
+  }
+
+  const updated = await db.ride.findUniqueOrThrow({
+    where: { id: ride.id },
     include: { driver: true, rider: true },
   });
   await recordRideStatus(updated.id, "in_progress");

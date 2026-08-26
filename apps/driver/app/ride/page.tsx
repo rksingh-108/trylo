@@ -187,7 +187,14 @@ export default function ActiveRidePage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" size="icon" className="rounded-full" aria-label="Call rider">
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="rounded-full"
+                  aria-label="Calling is not available yet"
+                  title="Calling is not available yet"
+                  disabled
+                >
                   <Phone size={16} />
                 </Button>
                 <Button

@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Check, MapPin, Navigation, X } from "lucide-react";
-import { Button, Card, FareBadge, RatingStars } from "@trylo/ui";
+import { Button, Card, FareBadge, RatingStars, toast } from "@trylo/ui";
 import { useAcceptRideRequest, useRejectRideRequest } from "@trylo/mock-data/hooks";
 import type { IncomingRequestOffer } from "@trylo/mock-data";
 
@@ -77,7 +77,11 @@ export function IncomingRequestOverlay({ offer }: { offer: IncomingRequestOffer 
 
   async function handleAccept() {
     const ride = await acceptRequest.mutateAsync(offer.ride.id);
-    if (ride) router.push("/ride");
+    if (ride) {
+      router.push("/ride");
+    } else {
+      toast.error("Ride no longer available", { description: "This request was taken or expired." });
+    }
   }
 
   function handleReject() {
