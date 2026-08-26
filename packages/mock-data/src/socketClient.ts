@@ -5,6 +5,14 @@ const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 let socket: Socket | null = null;
 
+// Room membership lives on the server, keyed to a specific socket connection.
+// A reconnect (network blip, mobile backgrounding, cell handoff while the
+// driver is riding) gets a fresh connection that's in no rooms at all, so
+// every previously-joined room must be re-emitted on "connect" or the client
+// silently stops receiving ride:updated/driver:location for it.
+const joinedRideRooms = new Set<string>();
+const joinedDriverRooms = new Set<string>();
+
 function getSocket(): Socket | null {
   if (typeof window === "undefined") return null;
   if (!socket) {
@@ -16,6 +24,10 @@ function getSocket(): Socket | null {
       // the apiClient's silent refresh — see apiClient.ts).
       auth: (cb) => cb({ token: getToken() }),
     });
+    socket.on("connect", () => {
+      for (const rideId of joinedRideRooms) socket!.emit("join:ride", rideId);
+      for (const driverId of joinedDriverRooms) socket!.emit("join:driver", driverId);
+    });
   } else if (!socket.connected) {
     // A prior connection attempt may have been rejected (e.g. no token yet
     // at first page load, before login). Re-trigger with the latest token.
@@ -25,14 +37,17 @@ function getSocket(): Socket | null {
 }
 
 export function joinRideRoom(rideId: string) {
+  joinedRideRooms.add(rideId);
   getSocket()?.emit("join:ride", rideId);
 }
 
 export function leaveRideRoom(rideId: string) {
+  joinedRideRooms.delete(rideId);
   getSocket()?.emit("leave:ride", rideId);
 }
 
 export function joinDriverRoom(driverId: string) {
+  joinedDriverRooms.add(driverId);
   getSocket()?.emit("join:driver", driverId);
 }
 

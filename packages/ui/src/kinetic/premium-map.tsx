@@ -398,6 +398,7 @@ export function PremiumMap({
   const heading = useHeading(liveMarker);
   const mapCenter = center ?? pickup ?? drop ?? DEFAULT_CENTER;
   const initialCenterRef = React.useRef(mapCenter);
+  const readyRef = React.useRef(false);
 
   // Initialize the map once.
   React.useEffect(() => {
@@ -421,10 +422,19 @@ export function PremiumMap({
     if (interactive) {
       instance.addControl(new maplibregl.NavigationControl({ showCompass: true, showZoom: true }), "top-right");
     }
-    instance.on("load", () => setReady(true));
+    instance.on("load", () => {
+      readyRef.current = true;
+      setReady(true);
+    });
     instance.on("error", (e) => {
       console.error("MapLibre map error:", e.error);
-      setLoadError(true);
+      // Only the *initial* style/tile load is fatal enough to replace the map
+      // with the "failed to load" fallback. Once the map has loaded once, a
+      // later error event is almost always a transient hiccup (a single tile
+      // request, a brief signal drop on a moving vehicle) that MapLibre
+      // recovers from on its own — tearing down an already-working map for
+      // that would be strictly worse than leaving it alone.
+      if (!readyRef.current) setLoadError(true);
     });
 
     mapRef.current = instance;
@@ -435,6 +445,7 @@ export function PremiumMap({
       mapRef.current = null;
       setMap(null);
       setReady(false);
+      readyRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
