@@ -134,12 +134,20 @@ router.post("/location", requireAuth("driver"), async (req, res) => {
             });
           }
         }
-      } else if (isTrustworthy && activeRide.arrivalConfirmations > 0) {
+      } else if (isTrustworthy) {
         // A trustworthy reading that's clearly outside the radius - the
         // driver genuinely isn't there, so any partial progress toward
-        // confirming arrival no longer reflects reality.
+        // confirming arrival no longer reflects reality. The
+        // `arrivalConfirmations: { gt: 0 }` guard is evaluated against the
+        // live row at write time, not this request's own `activeRide`
+        // snapshot from the top of the handler - deciding whether to reset
+        // from that stale snapshot could either fire an unnecessary no-op
+        // write (harmless) or, worse, skip resetting progress that a
+        // concurrent in-radius ping added *after* this request's read (this
+        // request would then wrongly believe there's nothing to reset). Only
+        // the live value, checked atomically in the WHERE clause, decides.
         await db.ride.updateMany({
-          where: { id: activeRide.id, status: "arriving" },
+          where: { id: activeRide.id, status: "arriving", arrivalConfirmations: { gt: 0 } },
           data: { arrivalConfirmations: 0 },
         });
       }
@@ -364,86 +372,76 @@ router.post("/rides/:rideId/verify-otp", requireAuth("driver"), async (req, res)
 
 const rideWithRelations = { driver: true, rider: true } satisfies Prisma.RideInclude;
 
-// Completion + payment are gated by a single atomic UPDATE guarded on the ride's
-// current status, not a read-then-write: an `updateMany` conditioned on
-// `status: "in_progress"` is a compare-and-swap at the database level (Postgres
-// locks the matched row and rechecks the WHERE predicate before committing), so
-// only the request that actually wins the transition proceeds to process payment.
-// Any other call for this ride — a client retry, a double-tap, or a genuinely
-// concurrent duplicate request — sees `count === 0` and just returns the ride's
-// current (already-decided) state instead of reprocessing payment. The unique
-// constraints on `WalletTransaction.rideId` and `DriverEarning.rideId` are a
-// second, database-level backstop against ever double-crediting a ride.
+// Completion and payment used to be two separate steps: a standalone CAS
+// flipped status to "completed", and only *then* did a follow-up block debit
+// the wallet/credit the driver. If anything threw in between (a transient DB
+// error, a dropped connection), the ride was left permanently "completed"
+// with paymentStatus stuck at its "pending" default and no retry path -
+// a retry's CAS would see count === 0 (status is no longer "in_progress")
+// and just hand back that same stuck state forever.
+//
+// Now the status transition and the entire payment outcome are one Prisma
+// interactive transaction: the CAS is the *first* statement inside it, so
+// Postgres's row lock on the matched UPDATE is what actually serializes
+// concurrent/duplicate calls (not a unique-constraint catch afterward) - a
+// second call's CAS blocks until the first transaction resolves, then
+// re-evaluates its WHERE against the now-committed (or rolled-back) row. If
+// the first committed, the second sees status !== "in_progress" and no-ops.
+// If the first rolled back (any later statement in it threw), the second
+// finds status is still "in_progress" and processes payment itself instead -
+// a genuine unexpected error now results in a full, safe retry rather than a
+// half-applied ride. Because only one call can ever reach the wallet/earning
+// writes for a given completion, the old P2002-duplicate-payment catch is no
+// longer reachable and has been removed.
 router.post("/rides/:rideId/end", requireAuth("driver"), async (req, res) => {
-  const { count } = await db.ride.updateMany({
-    where: { id: req.params.rideId, driverId: req.auth!.id, status: "in_progress" },
-    data: { status: "completed", completedAt: new Date() },
+  const rideId = req.params.rideId;
+  const driverId = req.auth!.id;
+
+  const finalRide = await db.$transaction(async (tx) => {
+    const { count } = await tx.ride.updateMany({
+      where: { id: rideId, driverId, status: "in_progress" },
+      data: { status: "completed", completedAt: new Date() },
+    });
+    if (count === 0) return null;
+
+    const ride = await tx.ride.findUniqueOrThrow({ where: { id: rideId }, include: rideWithRelations });
+
+    await tx.driver.update({
+      where: { id: driverId },
+      data: { totalRides: { increment: 1 }, lastRideEndedAt: new Date() },
+    });
+
+    const rider = await tx.user.findUnique({ where: { id: ride.riderId } });
+    const sufficientBalance = Boolean(rider) && rider!.walletBalance >= ride.fareTotal;
+
+    if (sufficientBalance) {
+      await tx.user.update({ where: { id: rider!.id }, data: { walletBalance: { decrement: ride.fareTotal } } });
+      await tx.walletTransaction.create({
+        data: {
+          userId: rider!.id,
+          rideId: ride.id,
+          type: "debit",
+          category: "ride",
+          amount: ride.fareTotal,
+          description: `Ride to ${ride.dropAddress}`,
+        },
+      });
+      await tx.driverEarning.create({
+        data: { driverId, rideId: ride.id, amount: ride.fareTotal },
+      });
+      return tx.ride.update({ where: { id: ride.id }, data: { paymentStatus: "paid" }, include: rideWithRelations });
+    }
+
+    return tx.ride.update({ where: { id: ride.id }, data: { paymentStatus: "failed" }, include: rideWithRelations });
   });
 
-  if (count === 0) {
-    const existing = await db.ride.findFirst({
-      where: { id: req.params.rideId, driverId: req.auth!.id },
-      include: rideWithRelations,
-    });
+  if (!finalRide) {
+    const existing = await db.ride.findFirst({ where: { id: rideId, driverId }, include: rideWithRelations });
     res.json(existing ? serializeRide(existing) : null);
     return;
   }
 
-  const ride = await db.ride.findUniqueOrThrow({
-    where: { id: req.params.rideId },
-    include: rideWithRelations,
-  });
-
-  await db.driver.update({
-    where: { id: req.auth!.id },
-    data: { totalRides: { increment: 1 }, lastRideEndedAt: new Date() },
-  });
-  await recordRideStatus(ride.id, "completed");
-
-  const rider = await db.user.findUnique({ where: { id: ride.riderId } });
-  const sufficientBalance = Boolean(rider) && rider!.walletBalance >= ride.fareTotal;
-
-  let finalRide = ride;
-  if (sufficientBalance) {
-    try {
-      const [, , , updatedRide] = await db.$transaction([
-        db.user.update({ where: { id: rider!.id }, data: { walletBalance: { decrement: ride.fareTotal } } }),
-        db.walletTransaction.create({
-          data: {
-            userId: rider!.id,
-            rideId: ride.id,
-            type: "debit",
-            category: "ride",
-            amount: ride.fareTotal,
-            description: `Ride to ${ride.dropAddress}`,
-          },
-        }),
-        db.driverEarning.create({
-          data: { driverId: req.auth!.id, rideId: ride.id, amount: ride.fareTotal },
-        }),
-        db.ride.update({
-          where: { id: ride.id },
-          data: { paymentStatus: "paid" },
-          include: rideWithRelations,
-        }),
-      ]);
-      finalRide = updatedRide;
-    } catch (err) {
-      // P2002 = unique constraint violation on rideId — another request already
-      // processed this ride's payment (the race-safety-net mentioned above).
-      // Anything else is a genuine unexpected error and should surface as one.
-      const isDuplicatePayment = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
-      if (!isDuplicatePayment) throw err;
-      finalRide = await db.ride.findUniqueOrThrow({ where: { id: ride.id }, include: rideWithRelations });
-    }
-  } else {
-    finalRide = await db.ride.update({
-      where: { id: ride.id },
-      data: { paymentStatus: "failed" },
-      include: rideWithRelations,
-    });
-  }
-
+  await recordRideStatus(finalRide.id, "completed");
   emitRideUpdated(finalRide.id, serializeRide(finalRide));
 
   if (finalRide.paymentStatus === "paid") {

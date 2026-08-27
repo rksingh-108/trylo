@@ -7,6 +7,7 @@
 import { io } from "socket.io-client";
 import { db } from "../src/db";
 import { hashPassword } from "../src/auth/password";
+import { LATE_CANCELLATION_FEE_INR } from "../src/lib/cancellationPolicy";
 
 const API = process.env.API_URL ?? "http://localhost:4000";
 let failures = 0;
@@ -337,6 +338,78 @@ async function runCancellationScenarios() {
 
   driverSocket.close();
 
+  // ---- Scenario 5: a genuine (non-duplicate) failure while charging the late-
+  // cancellation fee must roll back the ENTIRE cancellation, not leave the ride
+  // stuck "cancelled" with the fee silently never charged - and a retry after
+  // the obstruction clears must recover fully. Forces a real failure by
+  // pre-occupying this ride's unique WalletTransaction.rideId slot, so the
+  // cancel route's own fee walletTransaction.create throws a genuine P2002. ----
+  // This customer never topped up their wallet earlier in this scenario - give
+  // them enough balance to actually be charged the fee, so the fee-charging
+  // code path (and the forced failure inside it) is genuinely exercised.
+  await api("/api/customer/wallet/topup", { method: "POST", token: customerToken, body: { amount: 500 } });
+  const ride5 = await createRide(customerToken, pickup, drop);
+  await waitFor(
+    async () => {
+      const acc = await api<{ status: string }>(`/api/driver/requests/${ride5}/accept`, { method: "POST", token: driverToken });
+      return acc.status === 200 && acc.data ? acc : null;
+    },
+    "driver accepts ride5",
+    10000
+  );
+
+  const ride5Row = await db.ride.findUniqueOrThrow({ where: { id: ride5 } });
+  const blockerTxn = await db.walletTransaction.create({
+    data: {
+      userId: ride5Row.riderId,
+      rideId: ride5,
+      type: "debit",
+      category: "cancellation_fee",
+      amount: 1,
+      description: "test-only: occupies this ride's unique WalletTransaction slot to force a genuine mid-transaction failure",
+    },
+  });
+
+  const walletBefore5 = await api<{ balance: number }>("/api/customer/wallet", { token: customerToken });
+  const cancel5a = await api<{ error?: string }>(`/api/customer/rides/${ride5}/cancel`, {
+    method: "POST",
+    token: customerToken,
+    body: { reason: "Changed my mind" },
+  });
+  assert(cancel5a.status === 500, "a genuine failure mid-cancellation surfaces as an error instead of being silently swallowed", `status=${cancel5a.status}`);
+
+  const midRide5 = await db.ride.findUniqueOrThrow({ where: { id: ride5 } });
+  assert(
+    midRide5.status === "arriving" && midRide5.cancelledAt === null,
+    "the failed cancellation attempt rolled back entirely - ride is NOT stuck 'cancelled', still 'arriving'",
+    `status=${midRide5.status}`
+  );
+  const walletMid5 = await api<{ balance: number }>("/api/customer/wallet", { token: customerToken });
+  assert(walletMid5.data.balance === walletBefore5.data.balance, "no fee debit leaked through from the rolled-back attempt");
+
+  // Clear the obstruction and retry - must now succeed normally (safe recovery,
+  // ride cancels AND the fee is actually charged this time).
+  await db.walletTransaction.delete({ where: { id: blockerTxn.id } });
+  const cancel5b = await api<{ status: string }>(`/api/customer/rides/${ride5}/cancel`, {
+    method: "POST",
+    token: customerToken,
+    body: { reason: "Changed my mind" },
+  });
+  assert(cancel5b.status === 200 && cancel5b.data.status === "cancelled", "retrying cancel after the obstruction is cleared succeeds");
+
+  const walletAfter5 = await api<{ balance: number; transactions: Array<{ rideId?: string; category?: string }> }>(
+    "/api/customer/wallet",
+    { token: customerToken }
+  );
+  assert(
+    walletAfter5.data.balance === walletBefore5.data.balance - LATE_CANCELLATION_FEE_INR,
+    "the late-cancellation fee was actually charged on the recovered retry"
+  );
+  assert(
+    walletAfter5.data.transactions.filter((t) => t.rideId === ride5 && t.category === "cancellation_fee").length === 1,
+    "exactly one cancellation-fee transaction exists for ride5 after recovery (the blocker was deleted first)"
+  );
+
   // Take this driver offline so it doesn't compete with the payment-scenario driver
   // for ride offers below.
   await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
@@ -556,6 +629,62 @@ async function runPaymentScenarios() {
     token: richToken,
   });
   assert(!walletAfter5.data.transactions.some((t) => t.rideId === ride5), "cancelling a ride never creates a wallet transaction");
+
+  // ---- Scenario 6: a genuine (non-duplicate) failure partway through completion
+  // must roll back the ENTIRE thing, not leave the ride stuck "completed" with
+  // payment unresolved - and a retry after the obstruction clears must recover
+  // fully on its own. Forces a real failure (not a simulated one) by pre-occupying
+  // this ride's unique WalletTransaction.rideId slot, so /end's own
+  // walletTransaction.create throws a genuine P2002 partway through its
+  // transaction. ----
+  const ride6 = await createRide(richToken, pickup, drop);
+  await progressRideToInProgress(richToken, driverToken, ride6);
+
+  const ride6Row = await db.ride.findUniqueOrThrow({ where: { id: ride6 } });
+  const blockerTxn = await db.walletTransaction.create({
+    data: {
+      userId: ride6Row.riderId,
+      rideId: ride6,
+      type: "debit",
+      category: "cancellation_fee",
+      amount: 1,
+      description: "test-only: occupies this ride's unique WalletTransaction slot to force a genuine mid-transaction failure",
+    },
+  });
+
+  const walletBefore6 = await api<{ balance: number }>("/api/customer/wallet", { token: richToken });
+  const end6a = await api<{ error?: string }>(`/api/driver/rides/${ride6}/end`, { method: "POST", token: driverToken });
+  assert(end6a.status === 500, "a genuine failure mid-completion surfaces as an error instead of being silently swallowed", `status=${end6a.status}`);
+
+  const midRide6 = await db.ride.findUniqueOrThrow({ where: { id: ride6 } });
+  assert(
+    midRide6.status === "in_progress" && midRide6.paymentStatus === "pending",
+    "the failed completion attempt rolled back entirely - ride is NOT stuck 'completed', still 'in_progress'",
+    `status=${midRide6.status} paymentStatus=${midRide6.paymentStatus}`
+  );
+  const walletMid6 = await api<{ balance: number }>("/api/customer/wallet", { token: richToken });
+  assert(walletMid6.data.balance === walletBefore6.data.balance, "no wallet debit leaked through from the rolled-back attempt");
+  const earningsMid6 = await db.driverEarning.findUnique({ where: { rideId: ride6 } });
+  assert(!earningsMid6, "no driver earning leaked through from the rolled-back attempt");
+
+  // Clear the obstruction and retry - must now succeed normally (safe recovery,
+  // no permanent stuck state, no double-charge from the earlier failed attempt).
+  await db.walletTransaction.delete({ where: { id: blockerTxn.id } });
+  const end6b = await api<{ status: string; paymentStatus: string }>(`/api/driver/rides/${ride6}/end`, {
+    method: "POST",
+    token: driverToken,
+  });
+  assert(
+    end6b.data.status === "completed" && end6b.data.paymentStatus === "paid",
+    "retrying /end after the obstruction is cleared completes and pays normally - full recovery from the earlier failure"
+  );
+  const walletAfter6 = await api<{ balance: number; transactions: Array<{ rideId?: string }> }>("/api/customer/wallet", {
+    token: richToken,
+  });
+  assert(
+    walletAfter6.data.transactions.filter((t) => t.rideId === ride6).length === 1,
+    "exactly one wallet transaction exists for ride6 after recovery (the blocker was deleted first, so only the real debit remains)"
+  );
 
   await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
 }
@@ -1173,6 +1302,105 @@ async function runConcurrentArrivalScenario() {
   await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
 }
 
+/**
+ * Fires a large concurrent burst mixing in-radius (good) and out-of-radius
+ * (bad) location pings while "arriving", to check that the arrival-
+ * confirmation reset (driverRide.routes.ts's POST /location) can't be
+ * corrupted by overlapping requests: the reset is now guarded by
+ * `arrivalConfirmations: { gt: 0 }` in the database WHERE clause - evaluated
+ * atomically against the live row - rather than a request's own possibly-stale
+ * read, so no interleaving of concurrent good/bad pings can leave the counter
+ * in an invalid state or wedge the ride so arrival can never trigger again.
+ * Uses its own ride so it doesn't disturb the other arrival scenarios.
+ */
+async function runArrivalConfirmationConcurrencyScenario() {
+  console.log("\n=== Concurrent good/bad location-ping burst doesn't corrupt confirmation state ===");
+  const suffix = Date.now().toString().slice(-8);
+  const customerPhone = `9${suffix}7`;
+  const driverPhone = `9${suffix}8`;
+
+  const custOtpReq = await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", {
+    method: "POST",
+    body: { phone: customerPhone },
+  });
+  const custVerify = await api<{ token: string }>("/api/customer/auth/otp/verify", {
+    method: "POST",
+    body: { phone: customerPhone, otp: custOtpReq.data.devHintOtp },
+  });
+  const customerToken = custVerify.data.token;
+  await api("/api/customer/auth/profile", {
+    method: "POST",
+    token: customerToken,
+    body: { name: "Reset Concurrency Rider" },
+  });
+
+  const { token: driverToken } = await onboardVerifiedOnlineDriver(driverPhone, "Reset Concurrency Driver");
+
+  const pickup = { address: "Reset Concurrency Pickup", point: { lat: 12.9716, lng: 77.5946 } };
+  const drop = { address: "Reset Concurrency Drop", point: { lat: 12.99, lng: 77.61 } };
+  const rideId = await createRide(customerToken, pickup, drop);
+
+  await waitFor(
+    async () => {
+      const acc = await api<{ status: string }>(`/api/driver/requests/${rideId}/accept`, { method: "POST", token: driverToken });
+      return acc.status === 200 && acc.data ? acc : null;
+    },
+    "driver accepts reset-concurrency ride",
+    10000
+  );
+
+  const goodPing = () =>
+    api("/api/driver/location", {
+      method: "POST",
+      token: driverToken,
+      body: { lat: pickup.point.lat, lng: pickup.point.lng, accuracy: 10 },
+    });
+  const badPing = () =>
+    api("/api/driver/location", {
+      method: "POST",
+      token: driverToken,
+      body: { lat: pickup.point.lat + 0.05, lng: pickup.point.lng + 0.05, accuracy: 10 }, // ~7.8km away
+    });
+
+  // A mixed concurrent burst, repeated across several rounds to exercise many
+  // possible interleavings of increments and resets landing in any order.
+  for (let round = 0; round < 5; round++) {
+    await Promise.all([goodPing(), badPing(), goodPing(), badPing()]);
+  }
+
+  // Whatever order those overlapping writes actually landed in, the ride must
+  // be in a perfectly valid, non-corrupted state: never a 500, never a
+  // negative/invalid confirmation count.
+  const midStatus = await api<{ status: string }>(`/api/customer/rides/${rideId}/status`, { token: customerToken });
+  assert(
+    ["arriving", "arrived"].includes(midStatus.data.status),
+    "ride is in a valid status after the mixed concurrent burst",
+    `status=${midStatus.data.status}`
+  );
+  const rideRow = await db.ride.findUniqueOrThrow({ where: { id: rideId } });
+  assert(
+    rideRow.arrivalConfirmations >= 0,
+    "arrivalConfirmations never went negative under the concurrent burst",
+    `value=${rideRow.arrivalConfirmations}`
+  );
+
+  if (midStatus.data.status === "arriving") {
+    // The counter must still be fully functional (not wedged) - two more clean
+    // good pings must reliably still reach arrival.
+    await goodPing();
+    await goodPing();
+    const finalStatus = await api<{ status: string; arrivedAt?: string }>(`/api/customer/rides/${rideId}/status`, {
+      token: customerToken,
+    });
+    assert(
+      finalStatus.data.status === "arrived" && !!finalStatus.data.arrivedAt,
+      "the confirmation counter is still fully functional after the concurrent burst - 2 fresh good pings reach 'arrived'"
+    );
+  }
+
+  await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
+}
+
 async function run() {
   const suffix = Date.now().toString().slice(-8);
   const customerPhone = `9${suffix}1`;
@@ -1517,6 +1745,7 @@ async function run() {
   await runAdminScenarios();
   await runGeoIndexScenarios();
   await runConcurrentArrivalScenario();
+  await runArrivalConfirmationConcurrencyScenario();
 }
 
 run()

@@ -200,35 +200,76 @@ const cancelSchema = z.object({ reason: z.string().default("Cancelled by rider")
 // from the rider's wallet through the same mechanism as the ride-completion
 // fare debit in driverRide.routes.ts.
 //
-// Uses the same compare-and-swap idiom as /rides/:rideId/end: only the request
-// that actually flips status to "cancelled" charges the fee. A retry or
-// genuinely concurrent duplicate call sees count === 0 and just returns the
-// ride's already-decided state. The unique constraint on
-// WalletTransaction.rideId is a second, database-level backstop against ever
-// double-charging a ride (this can never collide with the ride-fare debit,
-// since a ride is either cancelled or completed, never both).
+// The cancellation and its late-fee debit used to be two separate steps: a
+// standalone CAS flipped status to "cancelled", and only *then* did a
+// follow-up block try to charge the fee. If that fee transaction ever threw
+// for a genuine (non-duplicate) reason, the error propagated but the ride was
+// already committed as "cancelled" - a retry would see the ride already
+// cancelled and return it idempotently, silently skipping the fee forever.
+//
+// Now the status transition and the fee outcome are one Prisma interactive
+// transaction, with the CAS as its first statement - exactly the same
+// single-flight reasoning as /rides/:rideId/end: Postgres's row lock on the
+// matched UPDATE is what serializes concurrent/duplicate calls. If a later
+// statement throws for a genuine reason, the whole transaction (including the
+// status flip) rolls back, so a retry starts over from "still cancellable"
+// instead of being stuck with a cancelled-but-uncharged ride. Because only one
+// call can ever reach the fee-charging write for a given cancellation, the old
+// P2002-duplicate-fee catch is no longer reachable and has been removed.
 router.post("/:id/cancel", requireAuth("customer"), async (req, res) => {
   const parsed = cancelSchema.safeParse(req.body ?? {});
   const reason = parsed.success ? parsed.data.reason : "Cancelled by rider";
+  const rideId = req.params.id;
+  const riderId = req.auth!.id;
 
-  const existing = await db.ride.findFirst({ where: { id: req.params.id, riderId: req.auth!.id } });
+  const existing = await db.ride.findFirst({ where: { id: rideId, riderId } });
   if (!existing) {
     res.json(null);
     return;
   }
+  const late = isLateCancellation(existing.status);
 
-  const { count } = await db.ride.updateMany({
-    where: { id: req.params.id, riderId: req.auth!.id, status: { in: [...CANCELLABLE_STATUSES] } },
-    data: { status: "cancelled", cancelledAt: new Date(), cancelReason: reason, cancelledBy: "customer" },
+  const result = await db.$transaction(async (tx) => {
+    const { count } = await tx.ride.updateMany({
+      where: { id: rideId, riderId, status: { in: [...CANCELLABLE_STATUSES] } },
+      data: { status: "cancelled", cancelledAt: new Date(), cancelReason: reason, cancelledBy: "customer" },
+    });
+    if (count === 0) return null;
+
+    let feeCharged = false;
+    if (late) {
+      const rider = await tx.user.findUnique({ where: { id: riderId } });
+      if (rider && rider.walletBalance >= LATE_CANCELLATION_FEE_INR) {
+        await tx.user.update({ where: { id: rider.id }, data: { walletBalance: { decrement: LATE_CANCELLATION_FEE_INR } } });
+        await tx.walletTransaction.create({
+          data: {
+            userId: rider.id,
+            rideId,
+            type: "debit",
+            category: "cancellation_fee",
+            amount: LATE_CANCELLATION_FEE_INR,
+            description: "Late cancellation fee",
+          },
+        });
+        feeCharged = true;
+      }
+      // Insufficient balance: the cancellation still goes through - a rider must
+      // never be trapped in a ride because they can't afford the fee - it's
+      // simply not charged, the same graceful-failure precedent as the
+      // ride-fare debit in /rides/:rideId/end.
+    }
+
+    const ride = await tx.ride.findUniqueOrThrow({ where: { id: rideId }, include: { driver: true, rider: true } });
+    return { ride, feeCharged };
   });
 
-  if (count === 0) {
+  if (!result) {
     // Re-check the CURRENT state, not the pre-update `existing` snapshot: under a
     // genuine concurrent duplicate cancel, the loser's `existing` would still show
     // the pre-race status (e.g. "arriving") even though the winner already moved it
     // to "cancelled" - checking the fresh read here (rather than the stale one)
     // is what makes this branch correctly idempotent instead of 409-ing the loser.
-    const current = await db.ride.findFirst({ where: { id: existing.id }, include: { driver: true, rider: true } });
+    const current = await db.ride.findFirst({ where: { id: rideId }, include: { driver: true, rider: true } });
     if (current?.status === "cancelled") {
       res.json(serializeRide(current));
       return;
@@ -237,46 +278,18 @@ router.post("/:id/cancel", requireAuth("customer"), async (req, res) => {
     return;
   }
 
-  const late = isLateCancellation(existing.status);
-  const updated = await db.ride.findUniqueOrThrow({ where: { id: existing.id }, include: { driver: true, rider: true } });
-
-  if (late) {
-    const rider = await db.user.findUnique({ where: { id: existing.riderId } });
-    if (rider && rider.walletBalance >= LATE_CANCELLATION_FEE_INR) {
-      try {
-        await db.$transaction([
-          db.user.update({ where: { id: rider.id }, data: { walletBalance: { decrement: LATE_CANCELLATION_FEE_INR } } }),
-          db.walletTransaction.create({
-            data: {
-              userId: rider.id,
-              rideId: existing.id,
-              type: "debit",
-              category: "cancellation_fee",
-              amount: LATE_CANCELLATION_FEE_INR,
-              description: "Late cancellation fee",
-            },
-          }),
-        ]);
-        await notifyRideEvent({
-          rideId: existing.id,
-          ownerId: rider.id,
-          ownerRole: "customer",
-          title: "Cancellation fee charged",
-          body: `A ₹${LATE_CANCELLATION_FEE_INR} late cancellation fee was deducted from your wallet.`,
-        });
-      } catch (err) {
-        const isDuplicate = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
-        if (!isDuplicate) throw err;
-      }
-    }
-    // Insufficient balance: the cancellation still goes through - a rider must
-    // never be trapped in a ride because they can't afford the fee - it's
-    // simply not charged, the same graceful-failure precedent as the
-    // ride-fare debit in /rides/:rideId/end.
-  }
-
+  const { ride: updated, feeCharged } = result;
   await recordRideStatus(updated.id, "cancelled", updated.cancelReason ?? undefined);
   emitRideUpdated(updated.id, serializeRide(updated));
+  if (feeCharged) {
+    await notifyRideEvent({
+      rideId: updated.id,
+      ownerId: riderId,
+      ownerRole: "customer",
+      title: "Cancellation fee charged",
+      body: `A ₹${LATE_CANCELLATION_FEE_INR} late cancellation fee was deducted from your wallet.`,
+    });
+  }
   if (updated.driverId) {
     emitRequestCleared(updated.driverId);
     await notifyRideEvent({
