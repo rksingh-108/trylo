@@ -13,6 +13,20 @@ const router = Router();
 
 /** How close (in meters) the driver's GPS needs to be to the pickup point before we auto-mark arrival. */
 const ARRIVAL_RADIUS_METERS = 50;
+/**
+ * A ping whose own reported accuracy circle is wider than this is too
+ * unreliable to use for arrival detection at all (its uncertainty already
+ * exceeds ARRIVAL_RADIUS_METERS, so "within radius" wouldn't mean anything) -
+ * it's skipped rather than trusted either way.
+ */
+const MAX_TRUSTED_ACCURACY_METERS = 75;
+/**
+ * Consecutive trustworthy, within-radius pings required before committing
+ * "arrived" - guards against a single noisy GPS fix (urban multipath, a
+ * momentary jump) triggering arrival on its own. At the driver's ~3s report
+ * interval this adds only a few seconds' delay to a genuine arrival.
+ */
+const REQUIRED_ARRIVAL_CONFIRMATIONS = 2;
 /** Ride statuses during which the driver can raise an SOS - mirrors the chat-availability window in realtime/io.ts. */
 const SOS_ACTIVE_STATUSES = ["arriving", "arrived", "in_progress"] as const;
 /** Don't create a fresh SosAlert (and re-notify admins) for a rapid accidental double-tap on the same ride. */
@@ -39,12 +53,18 @@ router.post("/status", requireAuth("driver"), async (req, res) => {
   res.json(serializeDriver(driver));
 });
 
-// `heading` (the device's own GPS/compass-fused bearing, in degrees) is
-// purely a live broadcast value - it's relayed straight through to the ride
-// room so the rider's map can rotate the driver's marker to face the actual
-// direction of travel, never persisted on the Driver row (nothing besides
-// this live broadcast needs it, and it'd otherwise need a schema migration).
-const locationSchema = z.object({ lat: z.number(), lng: z.number(), heading: z.number().optional() });
+// `heading`/`accuracy` (the device's own GPS/compass-fused bearing and the
+// fix's reported accuracy radius in meters) are purely live values -
+// `heading` is relayed straight through to the ride room so the rider's map
+// can rotate the driver's marker; `accuracy` feeds the arrival-confirmation
+// check below. Neither is persisted on the Driver row (nothing besides this
+// live broadcast/check needs them, and it'd otherwise need a schema change).
+const locationSchema = z.object({
+  lat: z.number(),
+  lng: z.number(),
+  heading: z.number().optional(),
+  accuracy: z.number().optional(),
+});
 
 router.post("/location", requireAuth("driver"), async (req, res) => {
   const parsed = locationSchema.safeParse(req.body);
@@ -67,20 +87,60 @@ router.post("/location", requireAuth("driver"), async (req, res) => {
     if (activeRide.status === "arriving") {
       const distanceMeters =
         haversineKm(parsed.data, { lat: activeRide.pickupLat, lng: activeRide.pickupLng }) * 1000;
-      if (distanceMeters <= ARRIVAL_RADIUS_METERS) {
-        const arrived = await db.ride.update({
-          where: { id: activeRide.id },
-          data: { status: "arrived", arrivedAt: new Date() },
-          include: { driver: true, rider: true },
+      const accuracy = parsed.data.accuracy;
+      // A reading whose own uncertainty already exceeds what we're trying to
+      // measure can't tell us anything reliable either way - skip it entirely
+      // rather than let it count toward (or against) arrival.
+      const isTrustworthy = accuracy === undefined || accuracy <= MAX_TRUSTED_ACCURACY_METERS;
+
+      if (isTrustworthy && distanceMeters <= ARRIVAL_RADIUS_METERS) {
+        // A true DB-level increment (Postgres serializes concurrent
+        // UPDATE...SET x = x + 1 on the same row) rather than computing
+        // activeRide.arrivalConfirmations + 1 from this request's own
+        // (possibly stale) read - two overlapping pings each doing the
+        // latter could both compute the same "next" value from the same
+        // stale snapshot and silently lose an increment.
+        await db.ride.updateMany({
+          where: { id: activeRide.id, status: "arriving" },
+          data: { arrivalConfirmations: { increment: 1 } },
         });
-        await recordRideStatus(arrived.id, "arrived");
-        emitRideUpdated(arrived.id, serializeRide(arrived));
-        await notifyRideEvent({
-          rideId: arrived.id,
-          ownerId: arrived.riderId,
-          ownerRole: "customer",
-          title: "Driver has arrived",
-          body: "Your driver is waiting at the pickup point.",
+        const current = await db.ride.findUnique({
+          where: { id: activeRide.id },
+          select: { status: true, arrivalConfirmations: true },
+        });
+        if (current?.status === "arriving" && current.arrivalConfirmations >= REQUIRED_ARRIVAL_CONFIRMATIONS) {
+          // Atomic: only actually transitions if the ride is still exactly
+          // "arriving" at write time, so two overlapping pings that both
+          // observe the threshold crossed (e.g. right after the increment
+          // above) can't both push it through and double-process arrival -
+          // only one wins this compare-and-swap, the other sees count === 0.
+          const { count } = await db.ride.updateMany({
+            where: { id: activeRide.id, status: "arriving" },
+            data: { status: "arrived", arrivedAt: new Date() },
+          });
+          if (count > 0) {
+            const arrived = await db.ride.findUniqueOrThrow({
+              where: { id: activeRide.id },
+              include: { driver: true, rider: true },
+            });
+            await recordRideStatus(arrived.id, "arrived");
+            emitRideUpdated(arrived.id, serializeRide(arrived));
+            await notifyRideEvent({
+              rideId: arrived.id,
+              ownerId: arrived.riderId,
+              ownerRole: "customer",
+              title: "Driver has arrived",
+              body: "Your driver is waiting at the pickup point.",
+            });
+          }
+        }
+      } else if (isTrustworthy && activeRide.arrivalConfirmations > 0) {
+        // A trustworthy reading that's clearly outside the radius - the
+        // driver genuinely isn't there, so any partial progress toward
+        // confirming arrival no longer reflects reality.
+        await db.ride.updateMany({
+          where: { id: activeRide.id, status: "arriving" },
+          data: { arrivalConfirmations: 0 },
         });
       }
     }

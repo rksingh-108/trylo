@@ -164,6 +164,9 @@ async function run() {
     "'Driver assigned' notification pushed live over the ride room, tagged forRole=customer"
   );
 
+  // Arrival now requires REQUIRED_ARRIVAL_CONFIRMATIONS (2) consecutive
+  // trustworthy, in-radius pings - see driverRide.routes.ts's POST /location.
+  await api("/api/driver/location", { method: "POST", token: driver.token, body: PICKUP.point });
   await api("/api/driver/location", { method: "POST", token: driver.token, body: PICKUP.point });
   await waitFor(async () => {
     const list = await api<Array<{ title: string }>>("/api/customer/notifications", { token: customer.token });
@@ -354,6 +357,9 @@ async function run() {
 }
 
 async function progressToInProgressAndEnd(customerToken: string, driverToken: string, rideId: string) {
+  // Arrival now requires REQUIRED_ARRIVAL_CONFIRMATIONS (2) consecutive
+  // trustworthy, in-radius pings - see driverRide.routes.ts's POST /location.
+  await api("/api/driver/location", { method: "POST", token: driverToken, body: PICKUP.point });
   await api("/api/driver/location", { method: "POST", token: driverToken, body: PICKUP.point });
   await waitFor(async () => {
     const status = await api<{ status: string }>(`/api/customer/rides/${rideId}/status`, { token: customerToken });

@@ -38,8 +38,8 @@ export async function getDriverRideHistory(): Promise<Ride[]> {
   return apiClient.get<Ride[]>("/api/driver/rides/history");
 }
 
-export async function updateDriverLocation(lat: number, lng: number, heading?: number): Promise<Driver> {
-  return apiClient.post<Driver>("/api/driver/location", { lat, lng, heading });
+export async function updateDriverLocation(lat: number, lng: number, heading?: number, accuracy?: number): Promise<Driver> {
+  return apiClient.post<Driver>("/api/driver/location", { lat, lng, heading, accuracy });
 }
 
 export async function getDriverRideMessages(rideId: string): Promise<RideMessage[]> {

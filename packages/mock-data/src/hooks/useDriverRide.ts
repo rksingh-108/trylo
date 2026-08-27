@@ -166,6 +166,11 @@ export const LIVE_LOCATION_REPORT_INTERVAL_MS = 3000;
  * direction of travel; without it, the map falls back to estimating a
  * heading purely from successive position fixes, which is far less reliable
  * at low speed or through brief stops.
+ *
+ * Also reports `coords.accuracy` (the fix's own uncertainty radius, in
+ * meters) - the backend uses it to avoid treating a low-confidence reading as
+ * proof the driver has reached pickup (see POST /api/driver/location's
+ * arrival-confirmation check).
  */
 export function useReportLiveLocation(enabled: boolean) {
   const [position, setPosition] = React.useState<{ lat: number; lng: number; heading: number | null } | null>(null);
@@ -176,12 +181,14 @@ export function useReportLiveLocation(enabled: boolean) {
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
         const heading = typeof pos.coords.heading === "number" && Number.isFinite(pos.coords.heading) ? pos.coords.heading : null;
+        const accuracy =
+          typeof pos.coords.accuracy === "number" && Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : undefined;
         const next = { lat: pos.coords.latitude, lng: pos.coords.longitude, heading };
         setPosition(next);
         const now = Date.now();
         if (now - lastSentRef.current > LIVE_LOCATION_REPORT_INTERVAL_MS) {
           lastSentRef.current = now;
-          driverRideService.updateDriverLocation(next.lat, next.lng, heading ?? undefined).catch(() => {});
+          driverRideService.updateDriverLocation(next.lat, next.lng, heading ?? undefined, accuracy).catch(() => {});
         }
       },
       () => {

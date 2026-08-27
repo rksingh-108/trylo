@@ -121,7 +121,13 @@ async function onboardVerifiedOnlineDriver(phone: string, name: string): Promise
       return status.data === "verified";
     },
     "cancellation-test driver verification status = verified",
-    15000
+    // KYC auto-verification nominally resolves in ~5s (lib/kyc.ts), but this
+    // helper is also used by scenarios that run late in the suite (e.g. the
+    // concurrent-arrival scenario, after cancellation/payment/admin/geo-index
+    // have already put the shared local API/DB under load) - 30s (double the
+    // original 15s) gives headroom without masking a genuine hang, matching
+    // the same adjustment already made in e2e-new-features-test.ts.
+    30000
   );
   await api("/api/driver/status", { method: "POST", token, body: { isOnline: true } });
   const me = await api<{ id: string }>("/api/driver/auth/me", { token });
@@ -295,6 +301,9 @@ async function runCancellationScenarios() {
     "driver accepts ride4",
     10000
   );
+  // Arrival now requires REQUIRED_ARRIVAL_CONFIRMATIONS (2) consecutive
+  // trustworthy, in-radius pings - see driverRide.routes.ts's POST /location.
+  await api("/api/driver/location", { method: "POST", token: driverToken, body: { lat: pickup.point.lat, lng: pickup.point.lng } });
   await api("/api/driver/location", { method: "POST", token: driverToken, body: { lat: pickup.point.lat, lng: pickup.point.lng } });
   await waitFor(
     async () => {
@@ -1073,6 +1082,97 @@ async function runGeoIndexScenarios() {
   }
 }
 
+/**
+ * Fires several overlapping location pings once the driver is already at the
+ * confirmation threshold, to check the arrival transition's compare-and-swap
+ * guard (see driverRide.routes.ts's POST /location): concurrent requests that
+ * all observe the threshold crossed must not each push the ride through and
+ * duplicate-process arrival (duplicate status-history rows, duplicate
+ * "Driver has arrived" notifications, duplicate realtime pushes) - only one
+ * should win.
+ */
+async function runConcurrentArrivalScenario() {
+  console.log("\n=== Concurrent location-ping arrival scenario ===");
+  const suffix = Date.now().toString().slice(-8);
+  const customerPhone = `9${suffix}5`;
+  const driverPhone = `9${suffix}6`;
+
+  const custOtpReq = await api<{ devHintOtp: string }>("/api/customer/auth/otp/request", {
+    method: "POST",
+    body: { phone: customerPhone },
+  });
+  const custVerify = await api<{ token: string }>("/api/customer/auth/otp/verify", {
+    method: "POST",
+    body: { phone: customerPhone, otp: custOtpReq.data.devHintOtp },
+  });
+  const customerToken = custVerify.data.token;
+  await api("/api/customer/auth/profile", {
+    method: "POST",
+    token: customerToken,
+    body: { name: "Concurrency Rider" },
+  });
+
+  const { token: driverToken } = await onboardVerifiedOnlineDriver(driverPhone, "Concurrency Driver");
+
+  const pickup = { address: "Concurrency Test Pickup", point: { lat: 12.9716, lng: 77.5946 } };
+  const drop = { address: "Concurrency Test Drop", point: { lat: 12.99, lng: 77.61 } };
+  const rideId = await createRide(customerToken, pickup, drop);
+
+  const customerSocket = io(API, { transports: ["websocket"], auth: { token: customerToken } });
+  await new Promise<void>((resolve) => customerSocket.on("connect", () => resolve()));
+  customerSocket.emit("join:ride", rideId);
+  let arrivedUpdateCount = 0;
+  customerSocket.on("ride:updated", (ride: { status: string }) => {
+    if (ride.status === "arrived") arrivedUpdateCount++;
+  });
+
+  await waitFor(
+    async () => {
+      const acc = await api<{ status: string }>(`/api/driver/requests/${rideId}/accept`, { method: "POST", token: driverToken });
+      return acc.status === 200 && acc.data ? acc : null;
+    },
+    "driver accepts concurrency-test ride",
+    10000
+  );
+
+  // First confirmation, sent alone, to bring the ride to just below the
+  // REQUIRED_ARRIVAL_CONFIRMATIONS threshold.
+  await api("/api/driver/location", {
+    method: "POST",
+    token: driverToken,
+    body: { lat: pickup.point.lat, lng: pickup.point.lng, accuracy: 10 },
+  });
+
+  // Now fire several overlapping pings at once - each independently crosses
+  // the threshold from this vantage point, so this is exactly the race the
+  // CAS guard exists for.
+  await Promise.all(
+    Array.from({ length: 5 }, () =>
+      api("/api/driver/location", {
+        method: "POST",
+        token: driverToken,
+        body: { lat: pickup.point.lat, lng: pickup.point.lng, accuracy: 10 },
+      })
+    )
+  );
+
+  await waitFor(async () => arrivedUpdateCount > 0, "customer receives an 'arrived' realtime update", 5000);
+  // Give any duplicate-processing bug a moment to reveal itself as a second push.
+  await sleep(500);
+  assert(arrivedUpdateCount === 1, "exactly one 'arrived' realtime update was pushed despite concurrent pings", `got ${arrivedUpdateCount}`);
+
+  const arrivedView = await api<{ status: string; arrivedAt?: string }>(`/api/customer/rides/${rideId}/status`, {
+    token: customerToken,
+  });
+  assert(
+    arrivedView.data.status === "arrived" && !!arrivedView.data.arrivedAt,
+    "ride settled into 'arrived' exactly once under concurrent pings"
+  );
+
+  customerSocket.close();
+  await api("/api/driver/status", { method: "POST", token: driverToken, body: { isOnline: false } });
+}
+
 async function run() {
   const suffix = Date.now().toString().slice(-8);
   const customerPhone = `9${suffix}1`;
@@ -1277,15 +1377,49 @@ async function run() {
   });
   assert(stillArriving.data.status === "arriving", "ride still 'arriving' — driver not yet within arrival radius");
 
-  // ---- Driver location within the arrival radius: should auto-transition to 'arrived' ----
-  console.log("\n=== Driver arrives at pickup (GPS within radius) ===");
-  lastRideUpdate = null;
-  const nearLocation = await api("/api/driver/location", {
+  // ---- A single low-accuracy ping at pickup must NOT trigger arrival ----
+  // (its own uncertainty exceeds MAX_TRUSTED_ACCURACY_METERS, so it can't
+  // reliably confirm anything) - false-arrival regression check.
+  console.log("\n=== Low-accuracy ping at pickup does not falsely trigger arrival ===");
+  await api("/api/driver/location", {
     method: "POST",
     token: driverToken,
-    body: { lat: pickup.point.lat, lng: pickup.point.lng },
+    body: { lat: pickup.point.lat, lng: pickup.point.lng, accuracy: 200 },
   });
-  assert(nearLocation.status === 200, "driver location updated (at pickup)");
+  const stillArrivingLowAccuracy = await api<{ status: string }>(`/api/customer/rides/${rideId}/status`, {
+    token: customerToken,
+  });
+  assert(
+    stillArrivingLowAccuracy.data.status === "arriving",
+    "a single low-accuracy (200m) ping at pickup does not falsely trigger arrival"
+  );
+
+  // ---- Driver location within the arrival radius: requires REQUIRED_ARRIVAL_CONFIRMATIONS
+  // (2) consecutive trustworthy, in-radius pings before auto-transitioning to 'arrived' -
+  // a single good ping is not enough on its own (false-arrival regression check). ----
+  console.log("\n=== Driver arrives at pickup (GPS within radius) ===");
+  lastRideUpdate = null;
+  const nearLocation1 = await api("/api/driver/location", {
+    method: "POST",
+    token: driverToken,
+    body: { lat: pickup.point.lat, lng: pickup.point.lng, accuracy: 10 },
+  });
+  assert(nearLocation1.status === 200, "driver location updated (at pickup, 1st confirmation)");
+
+  const afterFirstPing = await api<{ status: string }>(`/api/customer/rides/${rideId}/status`, {
+    token: customerToken,
+  });
+  assert(
+    afterFirstPing.data.status === "arriving",
+    "a single good in-radius ping alone does not yet trigger arrival (needs 2 consecutive)"
+  );
+
+  const nearLocation2 = await api("/api/driver/location", {
+    method: "POST",
+    token: driverToken,
+    body: { lat: pickup.point.lat, lng: pickup.point.lng, accuracy: 10 },
+  });
+  assert(nearLocation2.status === 200, "driver location updated (at pickup, 2nd confirmation)");
 
   await waitFor(async () => lastRideUpdate?.status === "arrived", "customer receives realtime update: arrived", 5000);
   log("customer socket received arrived update", true);
@@ -1382,6 +1516,7 @@ async function run() {
   await runPaymentScenarios();
   await runAdminScenarios();
   await runGeoIndexScenarios();
+  await runConcurrentArrivalScenario();
 }
 
 run()

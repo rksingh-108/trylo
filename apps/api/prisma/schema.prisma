@@ -211,6 +211,13 @@ model Ride {
   excludedDriverIds String[]  @default([])
 
   acceptedAt   DateTime?
+  /// Consecutive location pings received while "arriving" that were both
+  /// GPS-accuracy-trustworthy and within ARRIVAL_RADIUS_METERS of pickup - a
+  /// single noisy fix no longer commits "arrived" on its own (see
+  /// driverRide.routes.ts's POST /location). Reset to 0 on a trustworthy
+  /// out-of-radius ping; an untrustworthy (poor-accuracy) ping neither
+  /// increments nor resets it.
+  arrivalConfirmations Int @default(0)
   arrivedAt    DateTime?
   startedAt    DateTime?
   completedAt  DateTime?
