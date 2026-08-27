@@ -1,4 +1,4 @@
-import type { Vehicle } from "./vehicle";
+import type { MarkerStyle, Vehicle } from "./vehicle";
 
 export type DriverVerificationStatus = "pending" | "verified" | "rejected";
 
@@ -10,6 +10,7 @@ export interface Driver {
   rating: number;
   totalRides: number;
   vehicle: Vehicle;
+  markerStyle: MarkerStyle;
   verificationStatus: DriverVerificationStatus;
   isOnline: boolean;
   location: GeoPoint;

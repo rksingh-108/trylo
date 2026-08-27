@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bike, Car, CarTaxiFront, HelpCircle, LogOut, Mail, Palette, Phone } from "lucide-react";
+import { Bike, Car, CarTaxiFront, HelpCircle, LogOut, Mail, Navigation, Palette, Phone } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -21,14 +21,58 @@ import {
   StatusPill,
   ThemeToggle,
 } from "@trylo/ui";
-import { useCurrentDriver, useKycDocuments, useLogoutDriver } from "@trylo/mock-data/hooks";
-import type { VehicleType } from "@trylo/types";
+import { useCurrentDriver, useKycDocuments, useLogoutDriver, useUpdateMarkerStyle } from "@trylo/mock-data/hooks";
+import type { MarkerStyle, VehicleType } from "@trylo/types";
 
 const VEHICLE_ICONS: Record<VehicleType, React.ComponentType<{ size?: number; className?: string }>> = {
   bike: Bike,
   auto: CarTaxiFront,
   cab: Car,
 };
+
+const MARKER_STYLE_OPTIONS: { value: MarkerStyle; label: string; description: string }[] = [
+  { value: "classic", label: "Classic", description: "Simple pulsing dot" },
+  { value: "arrow", label: "Arrow", description: "Forward-pointing chevron" },
+  { value: "beacon", label: "Beacon", description: "Bigger, glowing marker" },
+  { value: "compact", label: "Compact", description: "Small, no pulse" },
+];
+
+/** A lightweight stand-in for premium-map.tsx's liveDotHtml, just for picking a style — doesn't need pixel-parity with the real map marker. */
+function MarkerStylePreview({ style, VehicleIcon }: { style: MarkerStyle; VehicleIcon: React.ComponentType<{ size?: number; className?: string }> }) {
+  if (style === "compact") {
+    return (
+      <span className="grid h-4 w-4 place-items-center rounded-full border-[1.5px] border-background bg-primary shadow-sm">
+        <VehicleIcon size={9} className="text-primary-foreground" />
+      </span>
+    );
+  }
+  if (style === "beacon") {
+    return (
+      <span className="relative grid h-9 w-9 place-items-center rounded-full border-[3px] border-background bg-primary shadow-md">
+        <span className="absolute -inset-1.5 rounded-full bg-primary/25" />
+        <VehicleIcon size={15} className="relative text-primary-foreground" />
+      </span>
+    );
+  }
+  if (style === "arrow") {
+    return (
+      <span className="relative grid h-9 w-9 place-items-center">
+        <span
+          className="absolute inset-0 bg-primary drop-shadow"
+          style={{ clipPath: "polygon(50% 0%, 92% 88%, 50% 66%, 8% 88%)" }}
+        />
+        <span className="absolute bottom-0 grid h-4 w-4 place-items-center rounded-full border-[1.5px] border-primary bg-background">
+          <VehicleIcon size={9} className="text-primary" />
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="grid h-6 w-6 place-items-center rounded-full border-2 border-background bg-primary shadow-sm">
+      <VehicleIcon size={11} className="text-primary-foreground" />
+    </span>
+  );
+}
 
 function initials(name: string) {
   return name
@@ -45,6 +89,7 @@ export default function ProfilePage() {
   const { data: driver } = useCurrentDriver();
   const { data: documents } = useKycDocuments();
   const logout = useLogoutDriver();
+  const updateMarkerStyle = useUpdateMarkerStyle();
 
   function handleLogout() {
     logout.mutate(undefined, {
@@ -115,14 +160,60 @@ export default function ProfilePage() {
 
       <div className="mt-6">
         <p className="mb-2 text-sm font-medium text-foreground">Settings</p>
-        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
-              <Palette size={18} className="text-foreground" />
-            </span>
-            <p className="text-sm font-medium text-foreground">Appearance</p>
+        <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
+          <div className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
+                <Palette size={18} className="text-foreground" />
+              </span>
+              <p className="text-sm font-medium text-foreground">Appearance</p>
+            </div>
+            <ThemeToggle />
           </div>
-          <ThemeToggle />
+
+          <Dialog>
+            <DialogTrigger asChild>
+              <button type="button" className="flex w-full items-center justify-between p-4 text-left">
+                <div className="flex items-center gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
+                    <Navigation size={18} className="text-foreground" />
+                  </span>
+                  <p className="text-sm font-medium text-foreground">Marker style</p>
+                </div>
+                <span className="text-sm text-muted-foreground">
+                  {MARKER_STYLE_OPTIONS.find((o) => o.value === (driver?.markerStyle ?? "classic"))?.label}
+                </span>
+              </button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Live map marker style</DialogTitle>
+                <DialogDescription>
+                  Choose how your live position appears on the map. Your vehicle type is always shown correctly regardless of style.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                {MARKER_STYLE_OPTIONS.map((option) => {
+                  const selected = (driver?.markerStyle ?? "classic") === option.value;
+                  return (
+                    <DialogClose asChild key={option.value}>
+                      <button
+                        type="button"
+                        onClick={() => updateMarkerStyle.mutate(option.value)}
+                        className={`flex flex-col items-center gap-2 rounded-xl border p-4 transition-colors ${
+                          selected ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-accent"
+                        }`}
+                      >
+                        <MarkerStylePreview style={option.value} VehicleIcon={VehicleIcon ?? Bike} />
+                        <span className="text-sm font-medium text-foreground">{option.label}</span>
+                        <span className="text-center text-xs text-muted-foreground">{option.description}</span>
+                      </button>
+                    </DialogClose>
+                  );
+                })}
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 

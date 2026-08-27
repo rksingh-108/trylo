@@ -89,6 +89,21 @@ router.post("/vehicle", requireAuth("driver"), async (req, res) => {
   res.json(serializeDriver(driver));
 });
 
+const markerStyleSchema = z.object({ markerStyle: z.enum(["classic", "arrow", "beacon", "compact"]) });
+
+router.post("/marker-style", requireAuth("driver"), async (req, res) => {
+  const parsed = markerStyleSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid marker style" });
+    return;
+  }
+  const driver = await db.driver.update({
+    where: { id: req.auth!.id },
+    data: { markerStyle: parsed.data.markerStyle },
+  });
+  res.json(serializeDriver(driver));
+});
+
 router.get("/me", requireAuth("driver"), async (req, res) => {
   const driver = await db.driver.findUnique({ where: { id: req.auth!.id } });
   res.json(driver ? serializeDriver(driver) : null);

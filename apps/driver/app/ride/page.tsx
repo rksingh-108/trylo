@@ -171,6 +171,7 @@ export default function ActiveRidePage() {
           liveMarker={liveGpsLocation ?? ride.driver?.location}
           liveMarkerHeading={liveGpsLocation?.heading}
           liveMarkerVehicleType={ride.driver?.vehicle.type}
+          liveMarkerStyle={ride.driver?.markerStyle}
           showRoute
           followLive={isArriving || isArrived || isInProgress}
           liveMarkerWaiting={isArrived}

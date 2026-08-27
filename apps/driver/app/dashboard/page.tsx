@@ -132,6 +132,7 @@ export default function DashboardPage() {
             liveMarker={driverLocation}
             liveMarkerHeading={liveGpsLocation?.heading}
             liveMarkerVehicleType={summary?.driver.vehicle.type}
+            liveMarkerStyle={summary?.driver.markerStyle}
             center={driverLocation}
             zoom={15}
             showCurrentLocationButton

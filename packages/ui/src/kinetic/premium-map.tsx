@@ -6,7 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { renderToStaticMarkup } from "react-dom/server";
 import { motion } from "framer-motion";
 import { Bike, Car, CarTaxiFront, LocateFixed, MapPin as MapPinIcon, Navigation } from "lucide-react";
-import type { VehicleType } from "@trylo/types";
+import type { MarkerStyle, VehicleType } from "@trylo/types";
 import { cn } from "../lib/cn";
 
 export interface MapGeoPoint {
@@ -43,6 +43,8 @@ export interface PremiumMapProps {
   liveMarkerWaiting?: boolean;
   /** The driver's vehicle type, when known - swaps the live marker's icon (bike/auto/cab) to match instead of a generic arrow. */
   liveMarkerVehicleType?: VehicleType;
+  /** The driver's chosen cosmetic marker skin (see Driver.markerStyle) - defaults to "classic" when unset. The vehicle icon itself is unaffected; this only changes the marker's shape/chrome. */
+  liveMarkerStyle?: MarkerStyle;
   onRouteInfo?: (info: RouteInfo) => void;
   /** Fires whenever the camera settles on a new center — panning, `flyTo`, or the current-location button. Used by the map location picker. */
   onCenterChange?: (point: MapGeoPoint) => void;
@@ -256,17 +258,76 @@ const LIVE_MARKER_ICONS: Record<VehicleType, React.ComponentType<{ size?: number
   cab: Car,
 };
 
-function liveDotHtml(waiting: boolean, vehicleType?: VehicleType): string {
+/**
+ * Renders the live marker's HTML for a given cosmetic style. Every variant
+ * still shows the correct vehicle icon (or a generic arrow when the vehicle
+ * type isn't known yet) - only the surrounding shape/chrome differs. The
+ * returned markup is always a single root element sized/anchored so that
+ * `useMapMarker`'s rotation (rotationAlignment: "map") turns it to face the
+ * live heading correctly regardless of style.
+ */
+function liveDotHtml(waiting: boolean, vehicleType?: VehicleType, style: MarkerStyle = "classic"): string {
   const Icon = (vehicleType && LIVE_MARKER_ICONS[vehicleType]) || Navigation;
+  const waitingRing = (inset: number) =>
+    waiting
+      ? `<span class="trylo-pulse-ring trylo-pulse-ring-slow" style="position:absolute;inset:-${inset}px;border-radius:9999px;background:hsl(var(--primary) / 0.3)"></span>`
+      : "";
+
+  if (style === "compact") {
+    const icon = renderToStaticMarkup(<Icon size={9} color="#fff" fill="#fff" />);
+    return `
+      <div>
+        <div class="trylo-live-enter" style="position:relative">
+          ${waitingRing(12)}
+          <span style="position:relative;display:grid;place-items:center;height:16px;width:16px;border-radius:9999px;border:1.5px solid white;background:hsl(var(--primary));box-shadow:0 2px 8px rgba(0,0,0,0.25)">
+            ${icon}
+          </span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (style === "beacon") {
+    const icon = renderToStaticMarkup(<Icon size={14} color="#fff" fill="#fff" />);
+    return `
+      <div>
+        <div class="trylo-live-enter" style="position:relative">
+          <span class="trylo-pulse-ring" style="position:absolute;inset:-14px;border-radius:9999px;background:hsl(var(--primary) / 0.45)"></span>
+          <span class="trylo-pulse-ring trylo-pulse-ring-slow" style="position:absolute;inset:-14px;border-radius:9999px;background:hsl(var(--primary) / 0.3)"></span>
+          ${waitingRing(22)}
+          <span style="position:relative;display:grid;place-items:center;height:32px;width:32px;border-radius:9999px;border:3px solid white;background:hsl(var(--primary));box-shadow:0 6px 18px rgba(0,0,0,0.3)">
+            ${icon}
+          </span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (style === "arrow") {
+    // A forward-pointing chevron (like a compass needle) with the vehicle
+    // icon in a small badge at its base - the chevron itself makes the
+    // heading direction obvious at a glance, even before it's read as rotated.
+    const icon = renderToStaticMarkup(<Icon size={9} color="hsl(var(--primary))" fill="hsl(var(--primary))" />);
+    return `
+      <div>
+        <div class="trylo-live-enter" style="position:relative;height:34px;width:34px">
+          ${waitingRing(16)}
+          <div style="position:absolute;inset:0;clip-path:polygon(50% 0%, 92% 88%, 50% 66%, 8% 88%);background:hsl(var(--primary));filter:drop-shadow(0 3px 6px rgba(0,0,0,0.35))"></div>
+          <span style="position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);display:grid;place-items:center;height:16px;width:16px;border-radius:9999px;border:1.5px solid hsl(var(--primary));background:#fff">
+            ${icon}
+          </span>
+        </div>
+      </div>
+    `;
+  }
+
+  // "classic" (the original design) - also the fallback for any unrecognized value.
   const icon = renderToStaticMarkup(<Icon size={11} color="#fff" fill="#fff" />);
-  const waitingRing = waiting
-    ? `<span class="trylo-pulse-ring trylo-pulse-ring-slow" style="position:absolute;inset:-16px;border-radius:9999px;background:hsl(var(--primary) / 0.3)"></span>`
-    : "";
   return `
     <div>
       <div class="trylo-live-enter" style="position:relative">
         <span class="trylo-pulse-ring" style="position:absolute;inset:-8px;border-radius:9999px;background:hsl(var(--primary) / 0.5)"></span>
-        ${waitingRing}
+        ${waitingRing(16)}
         <span style="position:relative;display:grid;place-items:center;height:24px;width:24px;border-radius:9999px;border:2px solid white;background:hsl(var(--primary));box-shadow:0 4px 14px rgba(0,0,0,0.25)">
           ${icon}
         </span>
@@ -421,6 +482,7 @@ export function PremiumMap({
   followLive = false,
   liveMarkerWaiting = false,
   liveMarkerVehicleType,
+  liveMarkerStyle = "classic",
   onRouteInfo,
   onCenterChange,
   children,
@@ -492,13 +554,14 @@ export function PremiumMap({
 
   useMapMarker(map, ready, pickup, pinHtml("pickup"), "bottom");
   useMapMarker(map, ready, drop, pinHtml("drop"), "bottom");
-  useMapMarker(map, ready, smoothLive, liveDotHtml(liveMarkerWaiting, liveMarkerVehicleType), "center", {
+  useMapMarker(map, ready, smoothLive, liveDotHtml(liveMarkerWaiting, liveMarkerVehicleType, liveMarkerStyle), "center", {
     rotation: heading,
     rotationAlignment: "map",
-    // vehicleType is included so the marker is torn down and rebuilt with the
-    // right icon once it resolves (e.g. arrives with the driver data a beat
-    // after the map itself mounts), not stuck with whatever it started as.
-    variantKey: `${liveMarkerVehicleType ?? "unknown"}-${liveMarkerWaiting ? "waiting" : "normal"}`,
+    // vehicleType/style are included so the marker is torn down and rebuilt
+    // with the right icon/shape once either resolves or changes (e.g.
+    // vehicle data arriving a beat after mount, or the driver switching
+    // their marker style), not stuck with whatever it started as.
+    variantKey: `${liveMarkerVehicleType ?? "unknown"}-${liveMarkerStyle}-${liveMarkerWaiting ? "waiting" : "normal"}`,
   });
 
   // Route + ETA via OSRM, drawn as a GeoJSON line layer that fades in smoothly.

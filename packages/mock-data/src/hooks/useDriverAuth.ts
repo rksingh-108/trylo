@@ -40,6 +40,19 @@ export function useSubmitVehicleDetails() {
   });
 }
 
+export function useUpdateMarkerStyle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: driverAuthService.updateMarkerStyle,
+    onSuccess: (driver) => {
+      queryClient.setQueryData(queryKeys.currentDriver, driver);
+      // dashboardSummary embeds its own copy of the driver, not derived from
+      // currentDriver, so it needs its own invalidation to pick up the change.
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardSummary });
+    },
+  });
+}
+
 export function useKycDocuments() {
   return useQuery({
     queryKey: queryKeys.kycDocuments,

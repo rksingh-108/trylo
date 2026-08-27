@@ -1,4 +1,4 @@
-import type { Driver, KycDocument, VehicleType } from "@trylo/types";
+import type { Driver, KycDocument, MarkerStyle, VehicleType } from "@trylo/types";
 import { apiClient } from "../apiClient";
 import { clearToken, getRefreshToken, getToken, setTokens } from "../tokenStore";
 
@@ -40,6 +40,10 @@ export interface VehicleDetailsInput {
 
 export async function submitVehicleDetails(input: VehicleDetailsInput): Promise<Driver> {
   return apiClient.post<Driver>("/api/driver/auth/vehicle", input);
+}
+
+export async function updateMarkerStyle(markerStyle: MarkerStyle): Promise<Driver> {
+  return apiClient.post<Driver>("/api/driver/auth/marker-style", { markerStyle });
 }
 
 export async function getKycDocuments(): Promise<KycDocument[]> {

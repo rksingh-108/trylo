@@ -13,6 +13,16 @@ enum VehicleType {
   cab
 }
 
+/// Purely cosmetic live-map marker skin a driver can pick for themselves -
+/// the vehicle icon shown inside a marker always still reflects VehicleType
+/// regardless of this setting (see premium-map.tsx's liveDotHtml).
+enum MarkerStyle {
+  classic
+  arrow
+  beacon
+  compact
+}
+
 enum RideStatus {
   requested
   matched
@@ -124,6 +134,7 @@ model Driver {
   model              String                   @default("")
   registrationNumber String                   @default("")
   color              String                   @default("")
+  markerStyle        MarkerStyle              @default(classic)
   verificationStatus DriverVerificationStatus @default(pending)
   isOnline           Boolean                  @default(false)
   onlineSince        DateTime?

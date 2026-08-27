@@ -170,6 +170,7 @@ export default function LiveRidePage() {
           liveMarker={liveDriverLocation ?? driver?.location}
           liveMarkerHeading={liveDriverLocation?.heading}
           liveMarkerVehicleType={driver?.vehicle.type}
+          liveMarkerStyle={driver?.markerStyle}
           showRoute
           followLive={followLive}
           liveMarkerWaiting={isArrived}

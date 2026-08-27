@@ -27,6 +27,7 @@ export function serializeDriver(driver: PrismaDriver): Driver {
     verificationStatus: driver.verificationStatus,
     isOnline: driver.isOnline,
     location: { lat: driver.lat, lng: driver.lng },
+    markerStyle: driver.markerStyle,
   };
 }
 
