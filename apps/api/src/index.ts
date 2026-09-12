@@ -7,6 +7,7 @@ import { env } from "./env";
 import { initSocketServer } from "./realtime/io";
 import { startMatchingLoop } from "./matching/matcher";
 import { seedPromoCodes } from "./lib/fare";
+import { hashPassword } from "./auth/password";
 
 // Route handlers here are async functions registered directly with Express,
 // which does not catch async errors on its own — an unhandled rejection
@@ -44,6 +45,18 @@ startMatchingLoop();
 // the DB-backed promo lookup in lib/fare.ts falls back to the same defaults, so
 // customers are never left with zero valid codes.
 seedPromoCodes(db);
+
+// Auto-seed a default admin account if none exists (same pattern as promo
+// seeding: idempotent, fire-and-forget at boot).
+(async () => {
+  const adminCount = await db.admin.count();
+  if (adminCount === 0) {
+    const email = process.env.ADMIN_EMAIL ?? "admin@trylo.dev";
+    const password = process.env.ADMIN_PASSWORD ?? "admin123";
+    await db.admin.create({ data: { email, name: "Admin", passwordHash: hashPassword(password) } });
+    console.log(`[seed] Default admin account created: ${email}`);
+  }
+})().catch((err) => console.error("[seed] Failed to seed admin:", err));
 
 // A failure to bind the port (e.g. EADDRINUSE from a stale process still
 // holding it) means this process cannot serve traffic at all — that must

@@ -46,7 +46,7 @@ export function SupportDialog({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!subject.trim() || !message.trim() || isCreating) return;
+    if (subject.trim().length < 3 || message.trim().length < 5 || isCreating) return;
     onCreate({ subject: subject.trim(), message: message.trim() });
     setSubject("");
     setMessage("");
@@ -95,7 +95,7 @@ export function SupportDialog({
             rows={4}
             className="w-full resize-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
           />
-          <Button type="submit" disabled={!subject.trim() || !message.trim() || isCreating}>
+          <Button type="submit" disabled={subject.trim().length < 3 || message.trim().length < 5 || isCreating}>
             {isCreating ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             Submit ticket
           </Button>
