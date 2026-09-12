@@ -40,7 +40,11 @@ router.get("/", requireAuth("driver"), async (req, res) => {
 
   res.json({
     period,
-    totalEarnings: earnings.reduce((sum, e) => sum + e.amount, 0),
+    // Tips settled to this driver ride the same way fares do: they land on the
+    // DriverEarning row (see customerRide.routes.ts /rate), so totalEarnings
+    // and the per-ride list below both include them, and the driver's payout
+    // availability (POST /payouts) counts them as withdrawable.
+    totalEarnings: earnings.reduce((sum, e) => sum + e.amount + e.tip, 0),
     totalRides: earnings.length,
     totalDistanceKm: Math.round(earnings.reduce((sum, e) => sum + e.ride.distanceKm, 0) * 10) / 10,
     // Real current online-session length within this window, not a random
@@ -50,30 +54,14 @@ router.get("/", requireAuth("driver"), async (req, res) => {
     rides: earnings.map((e) => ({
       rideId: e.rideId,
       fare: e.amount,
+      tip: e.tip,
       distanceKm: e.ride.distanceKm,
       completedAt: e.createdAt.toISOString(),
     })),
   });
 });
 
-function daysAgo(n: number): Date {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d;
-}
-
 router.get("/payouts", requireAuth("driver"), async (req, res) => {
-  const existing = await db.payoutRecord.count({ where: { driverId: req.auth!.id } });
-  if (existing === 0) {
-    await db.payoutRecord.createMany({
-      data: [
-        { driverId: req.auth!.id, amount: 4250, bankAccountLast4: "4821", initiatedAt: daysAgo(7), processedAt: daysAgo(6) },
-        { driverId: req.auth!.id, amount: 3890, bankAccountLast4: "4821", initiatedAt: daysAgo(14), processedAt: daysAgo(13) },
-        { driverId: req.auth!.id, amount: 5120, bankAccountLast4: "4821", initiatedAt: daysAgo(21), processedAt: daysAgo(20) },
-      ],
-    });
-  }
-
   const payouts = await db.payoutRecord.findMany({
     where: { driverId: req.auth!.id },
     orderBy: { initiatedAt: "desc" },
@@ -89,6 +77,64 @@ router.get("/payouts", requireAuth("driver"), async (req, res) => {
       processedAt: p.processedAt?.toISOString(),
     }))
   );
+});
+
+const payoutRequestSchema = z.object({
+  amount: z.number().int().positive(),
+  bankAccountLast4: z.string().regex(/^\d{4}$/, "Bank account must end in 4 digits"),
+});
+
+// Real payout request flow: the driver asks to withdraw part of their settled
+// earnings; the request lands as a 'pending' PayoutRecord that an admin
+// processes or rejects (see adminPayouts.routes.ts). This replaces the old
+// behavior of auto-seeding fake "processed" payouts so the screen had content -
+// payouts shown are now always real records, and an empty list honestly means
+// no payout has ever been requested.
+router.post("/payouts", requireAuth("driver"), async (req, res) => {
+  const parsed = payoutRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payout request" });
+    return;
+  }
+  const { amount, bankAccountLast4 } = parsed.data;
+
+  const driver = await db.driver.findUnique({ where: { id: req.auth!.id } });
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  // Available balance = total settled earnings (fare + tips) minus anything
+  // already requested (pending or processed) — a driver can't withdraw the
+  // same rupee twice, and a rejected request frees its amount back up.
+  const [earningsAgg, requestedAgg] = await Promise.all([
+    db.driverEarning.aggregate({ where: { driverId: req.auth!.id }, _sum: { amount: true, tip: true } }),
+    db.payoutRecord.aggregate({
+      where: { driverId: req.auth!.id, status: { in: ["pending", "processed"] } },
+      _sum: { amount: true },
+    }),
+  ]);
+  const earned = (earningsAgg._sum.amount ?? 0) + (earningsAgg._sum.tip ?? 0);
+  const requested = requestedAgg._sum.amount ?? 0;
+  const available = Math.max(0, earned - requested);
+
+  if (amount > available) {
+    res.status(400).json({ error: `Only ₹${available} is available to withdraw` });
+    return;
+  }
+
+  const payout = await db.payoutRecord.create({
+    data: { driverId: req.auth!.id, amount, bankAccountLast4, status: "pending" },
+  });
+
+  res.status(201).json({
+    id: payout.id,
+    amount: payout.amount,
+    status: payout.status,
+    bankAccountLast4: payout.bankAccountLast4,
+    initiatedAt: payout.initiatedAt.toISOString(),
+    processedAt: payout.processedAt?.toISOString(),
+  });
 });
 
 export default router;

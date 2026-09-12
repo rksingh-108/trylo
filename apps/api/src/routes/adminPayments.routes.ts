@@ -90,6 +90,7 @@ router.get("/driver-earnings", requireAuth("admin"), async (req, res) => {
       driverPhone: e.driver.phone,
       rideId: e.rideId,
       amount: e.amount,
+      tip: e.tip,
       distanceKm: e.ride.distanceKm,
       dropAddress: e.ride.dropAddress,
       createdAt: e.createdAt.toISOString(),

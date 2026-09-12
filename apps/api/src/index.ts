@@ -2,9 +2,11 @@ import { createServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import { readFileSync } from "fs";
 import { createApp } from "./app";
+import { db } from "./db";
 import { env } from "./env";
 import { initSocketServer } from "./realtime/io";
 import { startMatchingLoop } from "./matching/matcher";
+import { seedPromoCodes } from "./lib/fare";
 
 // Route handlers here are async functions registered directly with Express,
 // which does not catch async errors on its own — an unhandled rejection
@@ -36,6 +38,12 @@ const httpServer = useHttps
   : createServer(app);
 initSocketServer(httpServer);
 startMatchingLoop();
+
+// Seed the default promo codes once at startup (no-op if the table already has
+// rows). Fire-and-forget: if it fails (e.g. DB momentarily unavailable at boot),
+// the DB-backed promo lookup in lib/fare.ts falls back to the same defaults, so
+// customers are never left with zero valid codes.
+seedPromoCodes(db);
 
 // A failure to bind the port (e.g. EADDRINUSE from a stale process still
 // holding it) means this process cannot serve traffic at all — that must

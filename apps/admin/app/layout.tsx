@@ -6,6 +6,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "TRYLO Admin",
   description: "Operate the TRYLO platform — customers, drivers, rides, and payments.",
+  icons: {
+    icon: "/icon-512.png",
+    apple: "/apple-icon.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -22,6 +26,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript("trylo-admin-theme") }} />
+        <link rel="icon" href="/icon-192.png" sizes="192x192" />
+        <link rel="apple-touch-icon" href="/apple-icon.png" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

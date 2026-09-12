@@ -54,6 +54,18 @@ export function LocationSearchSheet({
   // input has been explicitly focused yet this time it's open.
   const targetField = activeField ?? autoFocus ?? "pickup";
 
+  // Programmatic focus pass-through: a caller can switch the sheet's target
+  // field while it stays open (e.g. "pick a destination first, then set your
+  // pickup") — autoFocus only applies on mount, so refocus the input matching
+  // `autoFocus` whenever it (or the open state) changes.
+  const pickupInputRef = React.useRef<HTMLInputElement>(null);
+  const dropInputRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const el = autoFocus === "drop" ? dropInputRef.current : pickupInputRef.current;
+    el?.focus();
+  }, [open, autoFocus]);
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent>
@@ -77,6 +89,7 @@ export function LocationSearchSheet({
               open={activeField === "pickup"}
               onFocus={() => setActiveField("pickup")}
               onBlur={() => setActiveField((field) => (field === "pickup" ? null : field))}
+              inputRef={pickupInputRef}
             />
             <PlaceAutocomplete
               value={dropValue}
@@ -87,6 +100,7 @@ export function LocationSearchSheet({
               open={activeField === "drop"}
               onFocus={() => setActiveField("drop")}
               onBlur={() => setActiveField((field) => (field === "drop" ? null : field))}
+              inputRef={dropInputRef}
             />
           </div>
         </div>

@@ -28,6 +28,10 @@ import adminRidesRoutes from "./routes/adminRides.routes";
 import adminPaymentsRoutes from "./routes/adminPayments.routes";
 import adminAnalyticsRoutes from "./routes/adminAnalytics.routes";
 import adminNotificationsRoutes from "./routes/adminNotifications.routes";
+import adminPromosRoutes from "./routes/adminPromos.routes";
+import adminPayoutsRoutes from "./routes/adminPayouts.routes";
+import adminSupportRoutes from "./routes/adminSupport.routes";
+import { createSupportRouter } from "./routes/support.routes";
 
 export function createApp() {
   const app = express();
@@ -50,12 +54,14 @@ export function createApp() {
   app.use("/api/customer/rides", customerRideRoutes);
   app.use("/api/customer/wallet", customerWalletRoutes);
   app.use("/api/customer/notifications", customerNotificationsRoutes);
+  app.use("/api/customer/support", createSupportRouter("customer"));
 
   app.use("/api/driver/auth/otp", otpLimiter);
   app.use("/api/driver/auth", driverAuthRoutes);
   app.use("/api/driver", driverRideRoutes);
   app.use("/api/driver/earnings", driverEarningsRoutes);
   app.use("/api/driver/notifications", driverNotificationsRoutes);
+  app.use("/api/driver/support", createSupportRouter("driver"));
 
   app.use("/api/admin/auth/login", adminLoginLimiter);
   app.use("/api/admin/auth", adminAuthRoutes);
@@ -66,6 +72,9 @@ export function createApp() {
   app.use("/api/admin/payments", adminPaymentsRoutes);
   app.use("/api/admin/analytics", adminAnalyticsRoutes);
   app.use("/api/admin/notifications", adminNotificationsRoutes);
+  app.use("/api/admin/promos", adminPromosRoutes);
+  app.use("/api/admin/payouts", adminPayoutsRoutes);
+  app.use("/api/admin/support", adminSupportRoutes);
 
   app.use((_req, res) => {
     res.status(404).json({ error: "Not found" });

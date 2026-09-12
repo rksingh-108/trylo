@@ -4,7 +4,7 @@ import type { VehicleType } from "@trylo/types";
 import { db } from "../db";
 import { requireAuth } from "../auth/middleware";
 import { searchAddressSuggestions } from "../lib/addresses";
-import { computeFare, fareRates, promoCodes } from "../lib/fare";
+import { computeFare, fareRates, loadActivePromoCodes } from "../lib/fare";
 import { haversineKm } from "../lib/geo";
 import { serializeDriver } from "../lib/serialize";
 
@@ -56,7 +56,7 @@ const fareEstimateSchema = z.object({
   promoCode: z.string().optional(),
 });
 
-router.get("/fares/estimates", requireAuth("customer"), (req, res) => {
+router.get("/fares/estimates", requireAuth("customer"), async (req, res) => {
   const parsed = fareEstimateSchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid fare request" });
@@ -64,7 +64,8 @@ router.get("/fares/estimates", requireAuth("customer"), (req, res) => {
   }
   const { pickupLat, pickupLng, dropLat, dropLng, promoCode } = parsed.data;
   const distanceKm = Math.max(0.8, haversineKm({ lat: pickupLat, lng: pickupLng }, { lat: dropLat, lng: dropLng }));
-  const promo = promoCode ? promoCodes.find((p) => p.code.toLowerCase() === promoCode.toLowerCase()) : undefined;
+  const activeCodes = await loadActivePromoCodes(db);
+  const promo = promoCode ? activeCodes.find((p) => p.code.toLowerCase() === promoCode.toLowerCase()) : undefined;
 
   const estimates = (Object.keys(fareRates) as VehicleType[]).map((vehicleType) => {
     const rate = fareRates[vehicleType];
@@ -75,9 +76,10 @@ router.get("/fares/estimates", requireAuth("customer"), (req, res) => {
   res.json(estimates);
 });
 
-router.get("/fares/promo/validate", requireAuth("customer"), (req, res) => {
+router.get("/fares/promo/validate", requireAuth("customer"), async (req, res) => {
   const code = typeof req.query.code === "string" ? req.query.code : "";
-  const promo = promoCodes.find((p) => p.code.toLowerCase() === code.toLowerCase());
+  const activeCodes = await loadActivePromoCodes(db);
+  const promo = activeCodes.find((p) => p.code.toLowerCase() === code.toLowerCase());
   res.json(promo ?? null);
 });
 

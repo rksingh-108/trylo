@@ -90,6 +90,10 @@ export function serializeRide(ride: RideWithRelations): Ride {
     cancelledBy: ride.cancelledBy === "admin" ? undefined : ride.cancelledBy ?? undefined,
     rating: ride.rating ?? undefined,
     tip: ride.tip ?? undefined,
+    /** True once the rider's tip has actually been settled to the driver's earnings. */
+    tipSettled: Boolean(ride.tipSettledAt),
+    /** Driver's rating of the rider (set via the driver rate-rider endpoint). */
+    riderRating: ride.riderRating ?? undefined,
     paymentStatus: ride.paymentStatus,
   };
 }

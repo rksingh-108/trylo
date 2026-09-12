@@ -19,3 +19,7 @@ export * from "./adminDrivers.service";
 export * from "./adminRides.service";
 export * from "./adminPayments.service";
 export * from "./adminAnalytics.service";
+export * from "./adminPromos.service";
+export * from "./adminPayouts.service";
+export * from "./adminSupport.service";
+export * from "./support.service";

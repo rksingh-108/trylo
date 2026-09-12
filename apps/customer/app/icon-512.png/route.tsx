@@ -15,7 +15,13 @@ export function GET() {
           background: "linear-gradient(135deg, #FF9A42, #F06000)",
         }}
       >
-        <div style={{ display: "flex", color: "white", fontSize: 256, fontWeight: 700, fontFamily: "sans-serif" }}>T</div>
+        <svg width="320" height="320" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+          {/* T letterform */}
+          <rect x="24" y="24" width="72" height="14" rx="4" fill="white"/>
+          <rect x="48" y="38" width="24" height="60" rx="4" fill="white"/>
+          {/* Forward arrow chevron */}
+          <path d="M66 58 L82 70 L66 82" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.4"/>
+        </svg>
       </div>
     ),
     { width: 512, height: 512 }

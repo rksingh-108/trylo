@@ -31,10 +31,19 @@ import {
   Label,
   PageTransition,
   RatingStars,
+  SupportDialog,
   ThemeToggle,
   toast,
 } from "@trylo/ui";
-import { useCompleteProfile, useCurrentUser, useLogout, usePaymentMethods, useSavedPlaces } from "@trylo/mock-data/hooks";
+import {
+  useCompleteProfile,
+  useCreateSupportTicket,
+  useCurrentUser,
+  useLogout,
+  usePaymentMethods,
+  useSavedPlaces,
+  useSupportTickets,
+} from "@trylo/mock-data/hooks";
 import type { PaymentMethod, SavedPlaceLabel } from "@trylo/types";
 
 const PAYMENT_ICONS: Record<PaymentMethod["type"], React.ComponentType<{ size?: number; className?: string }>> = {
@@ -65,6 +74,8 @@ export default function ProfilePage() {
   const { data: savedPlaces } = useSavedPlaces();
   const { data: paymentMethods } = usePaymentMethods();
   const logout = useLogout();
+  const supportTickets = useSupportTickets("customer");
+  const createTicket = useCreateSupportTicket("customer");
   const completeProfile = useCompleteProfile();
   const [editOpen, setEditOpen] = React.useState(false);
   const [editName, setEditName] = React.useState("");
@@ -224,6 +235,22 @@ export default function ProfilePage() {
           </div>
           <ThemeToggle />
         </div>
+      </div>
+
+      {/* Support */}
+      <div className="mt-6">
+        <p className="mb-2 text-sm font-medium text-foreground">Support</p>
+        <SupportDialog
+          tickets={supportTickets?.data}
+          isLoading={supportTickets.isLoading}
+          onCreate={(input) =>
+            createTicket.mutate(input, {
+              onSuccess: () => toast.success("Ticket submitted — we'll get back to you."),
+              onError: () => toast.error("Couldn't submit your ticket. Try again."),
+            })
+          }
+          isCreating={createTicket.isPending}
+        />
       </div>
 
       {/* Logout */}

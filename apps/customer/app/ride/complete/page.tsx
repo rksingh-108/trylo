@@ -194,7 +194,7 @@ export default function RideCompletePage() {
         )}
         {tip > 0 && (
           <div className="mt-2 flex justify-between text-sm">
-            <span className="text-muted-foreground">Tip (not yet supported — not charged)</span>
+            <span className="text-muted-foreground">Tip</span>
             <span className="text-foreground">₹{tip}</span>
           </div>
         )}
@@ -207,11 +207,18 @@ export default function RideCompletePage() {
           >
             {paymentFailed ? "Amount due" : "Total paid"}
           </span>
-          {/* Only the fare is ever actually charged — tipping isn't wired up to any
-              payment path yet, so it must never be folded into what "paid" claims. */}
-          <FareBadge amount={ride.fare.total} className={cn("text-lg", paymentFailed && "text-destructive")} />
+          {/* The fare plus any selected tip is what's debited from the wallet; the
+              tip is settled to the driver as part of submitting the rating (see the
+              /rate handler in customerRide.routes.ts). */}
+          <FareBadge amount={ride.fare.total + tip} className={cn("text-lg", paymentFailed && "text-destructive")} />
         </div>
       </motion.div>
+
+      {tip > 0 && paymentFailed && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          The ride fare couldn&apos;t be charged, so the tip won&apos;t be either — add money to your wallet first.
+        </p>
+      )}
 
       <div className="mt-auto flex flex-col gap-2 pt-6">
         <Button size="lg" variant="glow" disabled={rateRide.isPending} onClick={handleSubmit}>

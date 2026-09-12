@@ -43,4 +43,8 @@ export const queryKeys = {
   adminRidesTrend: (period: string) => ["adminRidesTrend", period] as const,
   adminRevenueTrend: (period: string) => ["adminRevenueTrend", period] as const,
   adminPaymentSuccessRate: ["adminPaymentSuccessRate"] as const,
+  adminPromos: ["adminPromos"] as const,
+  adminPayouts: ["adminPayouts"] as const,
+  adminSupportTickets: ["adminSupportTickets"] as const,
+  supportTickets: (role: string) => ["supportTickets", role] as const,
 };

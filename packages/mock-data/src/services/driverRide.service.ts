@@ -38,6 +38,10 @@ export async function getDriverRideHistory(): Promise<Ride[]> {
   return apiClient.get<Ride[]>("/api/driver/rides/history");
 }
 
+export async function rateRider(rideId: string, rating: number): Promise<Ride | null> {
+  return apiClient.post<Ride | null>(`/api/driver/rides/${rideId}/rate-rider`, { rating });
+}
+
 export async function updateDriverLocation(lat: number, lng: number, heading?: number, accuracy?: number): Promise<Driver> {
   return apiClient.post<Driver>("/api/driver/location", { lat, lng, heading, accuracy });
 }

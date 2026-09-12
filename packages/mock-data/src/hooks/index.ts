@@ -15,6 +15,9 @@ export * from "./useDriverDashboard";
 export * from "./useDriverRide";
 export * from "./useDriverEarnings";
 export * from "./useDriverNotifications";
+export * from "./useRateRider";
+export * from "./useRequestPayout";
+export * from "./useSupport";
 
 export * from "./useAdminAuth";
 export * from "./useAdminDashboard";
@@ -23,3 +26,6 @@ export * from "./useAdminDrivers";
 export * from "./useAdminRides";
 export * from "./useAdminPayments";
 export * from "./useAdminAnalytics";
+export * from "./useAdminPromos";
+export * from "./useAdminPayouts";
+export * from "./useAdminSupport";

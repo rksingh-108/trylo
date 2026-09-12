@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bike, Car, CarTaxiFront, HelpCircle, LogOut, Mail, Navigation, Palette, Phone } from "lucide-react";
+import { Bike, Car, CarTaxiFront, LogOut, Navigation, Palette } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -19,9 +19,18 @@ import {
   DialogTrigger,
   RatingStars,
   StatusPill,
+  SupportDialog,
   ThemeToggle,
+  toast,
 } from "@trylo/ui";
-import { useCurrentDriver, useKycDocuments, useLogoutDriver, useUpdateMarkerStyle } from "@trylo/mock-data/hooks";
+import {
+  useCreateSupportTicket,
+  useCurrentDriver,
+  useKycDocuments,
+  useLogoutDriver,
+  useSupportTickets,
+  useUpdateMarkerStyle,
+} from "@trylo/mock-data/hooks";
 import type { MarkerStyle, VehicleType } from "@trylo/types";
 
 const VEHICLE_ICONS: Record<VehicleType, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -90,6 +99,8 @@ export default function ProfilePage() {
   const { data: documents } = useKycDocuments();
   const logout = useLogoutDriver();
   const updateMarkerStyle = useUpdateMarkerStyle();
+  const supportTickets = useSupportTickets("driver");
+  const createTicket = useCreateSupportTicket("driver");
 
   function handleLogout() {
     logout.mutate(undefined, {
@@ -219,31 +230,18 @@ export default function ProfilePage() {
 
       <div className="mt-6">
         <p className="mb-2 text-sm font-medium text-foreground">Support</p>
-        {/* Not wired up yet - no support backend/telephony exists. Shown
-            disabled rather than as live-looking rows that do nothing. */}
-        <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card opacity-50">
-          <div className="flex items-center gap-3 p-4">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
-              <HelpCircle size={18} className="text-foreground" />
-            </span>
-            <p className="flex-1 text-sm font-medium text-foreground">Help center</p>
-            <span className="text-xs text-muted-foreground">Coming soon</span>
-          </div>
-          <div className="flex items-center gap-3 p-4">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
-              <Phone size={18} className="text-foreground" />
-            </span>
-            <p className="flex-1 text-sm font-medium text-foreground">Call support</p>
-            <span className="text-xs text-muted-foreground">Coming soon</span>
-          </div>
-          <div className="flex items-center gap-3 p-4">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent">
-              <Mail size={18} className="text-foreground" />
-            </span>
-            <p className="flex-1 text-sm font-medium text-foreground">Email us</p>
-            <span className="text-xs text-muted-foreground">Coming soon</span>
-          </div>
-        </div>
+        <SupportDialog
+          tickets={supportTickets?.data}
+          isLoading={supportTickets.isLoading}
+          subtitle="Raise a ticket — an admin will get back to you"
+          onCreate={(input) =>
+            createTicket.mutate(input, {
+              onSuccess: () => toast.success("Ticket submitted — we'll get back to you."),
+              onError: () => toast.error("Couldn't submit your ticket. Try again."),
+            })
+          }
+          isCreating={createTicket.isPending}
+        />
       </div>
 
       <div className="mt-auto pt-6">

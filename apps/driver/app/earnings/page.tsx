@@ -1,19 +1,30 @@
 "use client";
 
 import * as React from "react";
-import { Banknote, Clock4, MapPinned, TrendingUp, Wallet } from "lucide-react";
+import { ArrowDownToLine, Banknote, Clock4, Loader2, MapPinned, TrendingUp, Wallet } from "lucide-react";
 import {
   AnimatedCounter,
   Badge,
+  Button,
   Card,
   CardContent,
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
   FareBadge,
+  Input,
+  Label,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  toast,
 } from "@trylo/ui";
-import { useDriverEarnings, usePayoutHistory } from "@trylo/mock-data/hooks";
+import { useDriverEarnings, usePayoutHistory, useRequestPayout } from "@trylo/mock-data/hooks";
 import type { EarningsSummary, PayoutRecord } from "@trylo/types";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 
@@ -66,6 +77,82 @@ function EarningsChart({ rides }: { rides: EarningsSummary["rides"] }) {
         </BarChart>
       </ResponsiveContainer>
     </div>
+  );
+}
+
+function RequestPayoutDialog({ totalEarnings }: { totalEarnings: number }) {
+  const requestPayout = useRequestPayout();
+  const [amount, setAmount] = React.useState("");
+  const [bankLast4, setBankLast4] = React.useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    if (!/^\d{4}$/.test(bankLast4)) {
+      toast.error("Bank account must end in 4 digits");
+      return;
+    }
+    try {
+      await requestPayout.mutateAsync({ amount: amt, bankAccountLast4: bankLast4 });
+      toast.success("Payout requested — pending admin approval");
+      setAmount("");
+      setBankLast4("");
+    } catch (err) {
+      const message = (err as { message?: string }).message;
+      toast.error(message && message !== "" ? message : "Couldn't request payout");
+    }
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="shrink-0">
+          <ArrowDownToLine size={15} />
+          Request payout
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Request payout</DialogTitle>
+          <DialogDescription>
+            Withdraw part of your settled earnings to your bank account. An admin approves the request.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="mt-2 flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="payout-amount">Amount (₹)</Label>
+            <Input
+              id="payout-amount"
+              type="number"
+              min={1}
+              placeholder={`Up to ₹${totalEarnings.toLocaleString("en-IN")}`}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Available to withdraw: ₹{totalEarnings.toLocaleString("en-IN")}</p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="payout-bank">Bank account (last 4 digits)</Label>
+            <Input
+              id="payout-bank"
+              inputMode="numeric"
+              maxLength={4}
+              placeholder="4821"
+              value={bankLast4}
+              onChange={(e) => setBankLast4(e.target.value.replace(/\D/g, ""))}
+            />
+          </div>
+          <Button type="submit" disabled={requestPayout.isPending}>
+            {requestPayout.isPending ? <Loader2 size={15} className="animate-spin" /> : null}
+            Request ₹{amount ? Number(amount).toLocaleString("en-IN") : ""}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -155,7 +242,10 @@ export default function EarningsPage() {
                         <p className="mt-0.5 text-xs text-muted-foreground">{r.distanceKm} km</p>
                       </div>
                     </div>
-                    <FareBadge amount={r.fare} className="text-sm text-primary" />
+                    <div className="flex flex-col items-end gap-0.5">
+                      <FareBadge amount={r.fare} className="text-sm text-primary" />
+                      {r.tip > 0 && <span className="text-xs font-medium text-success">+₹{r.tip} tip</span>}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -165,7 +255,10 @@ export default function EarningsPage() {
       </Tabs>
 
       <div className="mt-6">
-        <p className="mb-2 text-sm font-medium text-foreground">Payout history</p>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-sm font-medium text-foreground">Payout history</p>
+          <RequestPayoutDialog totalEarnings={earnings?.totalEarnings ?? 0} />
+        </div>
         <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
           {payouts?.map((payout) => (
             <div key={payout.id} className="flex items-center gap-3 p-4">
@@ -188,7 +281,7 @@ export default function EarningsPage() {
             </div>
           ))}
           {payouts?.length === 0 && (
-            <p className="p-4 text-center text-sm text-muted-foreground">No payouts yet.</p>
+            <p className="p-4 text-center text-sm text-muted-foreground">No payouts yet — request one above.</p>
           )}
         </div>
       </div>

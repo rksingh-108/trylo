@@ -554,4 +554,44 @@ router.get("/rides/history", requireAuth("driver"), async (req, res) => {
   res.json(rides.map(serializeRide));
 });
 
+const rateRiderSchema = z.object({ rating: z.number().min(1).max(5) });
+
+// Mutual rating: after a completed ride, the driver rates the rider. The rating
+// lands on the ride (riderRating) and rolls up into the rider's overall User.rating
+// average, exactly mirroring how the customer's /rate updates the driver's rating.
+// Idempotent by design: re-submitting simply overwrites the ride's riderRating and
+// recomputes the same average — there is no money involved, so no settlement guard
+// is needed beyond the plain update.
+router.post("/rides/:rideId/rate-rider", requireAuth("driver"), async (req, res) => {
+  const parsed = rateRiderSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid rating" });
+    return;
+  }
+  const ride = await db.ride.findFirst({ where: { id: req.params.rideId, driverId: req.auth!.id } });
+  if (!ride || ride.status !== "completed") {
+    res.json(null);
+    return;
+  }
+
+  const updated = await db.$transaction(async (tx) => {
+    const updated = await tx.ride.update({
+      where: { id: ride.id },
+      data: { riderRating: parsed.data.rating },
+      include: { driver: true, rider: true },
+    });
+
+    const ratedRides = await tx.ride.findMany({
+      where: { riderId: ride.riderId, riderRating: { not: null } },
+      select: { riderRating: true },
+    });
+    const avg = ratedRides.reduce((sum, r) => sum + (r.riderRating ?? 0), 0) / ratedRides.length;
+    await tx.user.update({ where: { id: ride.riderId }, data: { rating: Math.round(avg * 10) / 10 } });
+
+    return updated;
+  });
+
+  res.json(serializeRide(updated));
+});
+
 export default router;

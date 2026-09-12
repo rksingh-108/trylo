@@ -84,6 +84,8 @@ export interface AdminDriverEarningEntry {
   driverPhone: string;
   rideId: string;
   amount: number;
+  /** Tip settled to the driver for this ride (0 if none). */
+  tip: number;
   distanceKm: number;
   dropAddress: string;
   createdAt: string;

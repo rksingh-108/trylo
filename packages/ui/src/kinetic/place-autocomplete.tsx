@@ -59,6 +59,12 @@ export interface PlaceAutocompleteProps {
   autoFocus?: boolean;
   className?: string;
   /**
+   * Lets a parent (e.g. LocationSearchSheet) programmatically focus this
+   * field — used to switch the rider from "pick a destination" to "set your
+   * pickup" in the middle of an open sheet without closing it.
+   */
+  inputRef?: React.Ref<HTMLInputElement>;
+  /**
    * Whether this field's dropdown is allowed to render. Callers that show
    * more than one PlaceAutocomplete at once (e.g. Pickup + Destination in
    * LocationSearchSheet) must track which field is currently active and
@@ -82,6 +88,7 @@ export function PlaceAutocomplete({
   open,
   onFocus,
   onBlur,
+  inputRef,
 }: PlaceAutocompleteProps) {
   const [results, setResults] = React.useState<PlaceResult[]>([]);
   const requestId = React.useRef(0);
@@ -110,6 +117,7 @@ export function PlaceAutocomplete({
         <div className="relative">
           <Search size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
+            ref={inputRef}
             value={value}
             autoFocus={autoFocus}
             onChange={(e) => onChange(e.target.value)}

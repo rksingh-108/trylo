@@ -8,7 +8,9 @@ import {
   BarChart3,
   Car,
   LayoutDashboard,
+  LifeBuoy,
   LogOut,
+  Percent,
   Route,
   Users,
   Wallet,
@@ -22,7 +24,9 @@ const ITEMS = [
   { href: "/drivers", label: "Drivers", icon: Car },
   { href: "/rides", label: "Rides", icon: Route },
   { href: "/payments", label: "Payments", icon: Wallet },
+  { href: "/promos", label: "Promos", icon: Percent },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/support", label: "Support", icon: LifeBuoy },
 ];
 
 export function Sidebar() {

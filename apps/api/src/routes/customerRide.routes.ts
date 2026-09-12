@@ -10,7 +10,7 @@ import { emitRequestCleared, emitRideUpdated } from "../realtime/io";
 import { recordRideStatus } from "../lib/rideHistory";
 import { notifyRideEvent, notifyAllAdmins } from "../lib/notify";
 import { isLateCancellation, LATE_CANCELLATION_FEE_INR } from "../lib/cancellationPolicy";
-import { fareRates, promoCodes } from "../lib/fare";
+import { fareRates, loadActivePromoCodes } from "../lib/fare";
 
 const router = Router();
 
@@ -56,7 +56,7 @@ const createRideSchema = z.object({
  * promoDiscount/total are arithmetically consistent with a real, currently-valid
  * promo code - not an arbitrary reduction.
  */
-function isValidFare(vehicleType: VehicleType, distanceKm: number, fare: FareBreakdown, promoCode?: string): boolean {
+async function isValidFare(vehicleType: VehicleType, distanceKm: number, fare: FareBreakdown, promoCode?: string): Promise<boolean> {
   const rate = fareRates[vehicleType];
   const durationMin = Math.max(3, Math.round((distanceKm / rate.avgSpeedKmph) * 60));
   const expectedBase = rate.base;
@@ -68,7 +68,8 @@ function isValidFare(vehicleType: VehicleType, distanceKm: number, fare: FareBre
   const expectedActiveSurge = Math.round(subtotal * 0.15);
   if (fare.surge !== 0 && fare.surge !== expectedActiveSurge) return false;
 
-  const promo = promoCode ? promoCodes.find((p) => p.code.toLowerCase() === promoCode.toLowerCase()) : undefined;
+  const activeCodes = await loadActivePromoCodes(db);
+  const promo = promoCode ? activeCodes.find((p) => p.code.toLowerCase() === promoCode.toLowerCase()) : undefined;
   const subtotalWithSurge = subtotal + fare.surge;
   const expectedPromoDiscount = promo
     ? Math.min(Math.round(subtotalWithSurge * (promo.discountPercent / 100)), promo.maxDiscount)
@@ -103,7 +104,7 @@ router.post("/", requireAuth("customer"), async (req, res) => {
 
   const distanceKm = Math.max(0.8, haversineKm(pickup.point, drop.point));
 
-  if (!isValidFare(vehicleType, distanceKm, fare, promoCode)) {
+  if (!(await isValidFare(vehicleType, distanceKm, fare, promoCode))) {
     res.status(400).json({ error: "Fare could not be verified - please go back and re-select your ride" });
     return;
   }
@@ -317,19 +318,76 @@ router.post("/:id/rate", requireAuth("customer"), async (req, res) => {
     return;
   }
 
-  const updated = await db.ride.update({
-    where: { id: ride.id },
-    data: { rating: parsed.data.rating, tip: parsed.data.tip },
-    include: { driver: true, rider: true },
+  // The rating + optional tip settle inside one transaction: the rating write
+  // itself, the driver's average recompute, and — when a tip was chosen — the
+  // rider wallet debit + driver earning credit + wallet ledger row all commit
+  // or roll back together. `tipSettledAt` is the idempotency guard: a
+  // re-submitted rating (e.g. a double-tap or a retry after a timeout) can
+  // update the rating again but can never settle the same tip twice, because
+  // the tip branch is gated on tipSettledAt still being null inside the same
+  // transaction that sets it.
+  // The rating + optional tip settle inside one transaction: the rating write
+  // itself, the driver's average recompute, and — when a tip was chosen — the
+  // rider wallet debit + driver earning credit + wallet ledger row all commit
+  // or roll back together. `tipSettledAt` is the idempotency guard: a
+  // re-submitted rating (e.g. a double-tap or a retry after a timeout) can
+  // update the rating again but can never settle the same tip twice, because
+  // the tip branch is gated on tipSettledAt still being null inside the same
+  // transaction that sets it.
+  let tipSettled = false;
+  const updated = await db.$transaction(async (tx) => {
+    const updated = await tx.ride.update({
+      where: { id: ride.id },
+      data: { rating: parsed.data.rating, tip: parsed.data.tip },
+      include: { driver: true, rider: true },
+    });
+
+    if (updated.driverId) {
+      const ratedRides = await tx.ride.findMany({
+        where: { driverId: updated.driverId, rating: { not: null } },
+        select: { rating: true },
+      });
+      const avg = ratedRides.reduce((sum, r) => sum + (r.rating ?? 0), 0) / ratedRides.length;
+      await tx.driver.update({ where: { id: updated.driverId }, data: { rating: Math.round(avg * 10) / 10 } });
+    }
+
+    // Settle the tip only when the ride's fare was actually paid — a ride that
+    // completed with paymentStatus "failed" has no settled fare, so charging a
+    // tip on top of it would be nonsense. Same graceful-failure precedent as
+    // the cancellation fee: if the rider's balance can't cover the tip, the
+    // tip is simply not charged (the ride and rating are unaffected).
+    const tip = parsed.data.tip;
+    if (tip > 0 && updated.driverId && updated.paymentStatus === "paid" && updated.tipSettledAt === null) {
+      const rider = await tx.user.findUnique({ where: { id: updated.riderId } });
+      const earning = await tx.driverEarning.findUnique({ where: { rideId: updated.id } });
+      if (rider && rider.walletBalance >= tip && earning) {
+        await tx.user.update({ where: { id: rider.id }, data: { walletBalance: { decrement: tip } } });
+        await tx.walletTransaction.create({
+          data: {
+            userId: rider.id,
+            type: "debit",
+            category: "tip",
+            amount: tip,
+            description: `Tip for driver ${updated.driver?.name ?? ""}`.trim(),
+          },
+        });
+        await tx.driverEarning.update({ where: { rideId: updated.id }, data: { tip: { increment: tip } } });
+        await tx.ride.update({ where: { id: updated.id }, data: { tipSettledAt: new Date() } });
+        tipSettled = true;
+      }
+    }
+
+    return updated;
   });
 
-  if (updated.driverId) {
-    const ratedRides = await db.ride.findMany({
-      where: { driverId: updated.driverId, rating: { not: null } },
-      select: { rating: true },
+  if (tipSettled && updated.tip) {
+    await notifyRideEvent({
+      rideId: updated.id,
+      ownerId: updated.driverId!,
+      ownerRole: "driver",
+      title: "Tip received",
+      body: `${updated.rider?.name ?? "Your rider"} tipped you ₹${updated.tip}. Thanks for the great ride!`,
     });
-    const avg = ratedRides.reduce((sum, r) => sum + (r.rating ?? 0), 0) / ratedRides.length;
-    await db.driver.update({ where: { id: updated.driverId }, data: { rating: Math.round(avg * 10) / 10 } });
   }
 
   res.json(serializeRide(updated));

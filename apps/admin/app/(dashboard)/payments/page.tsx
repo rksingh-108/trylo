@@ -1,7 +1,9 @@
 "use client";
 
+import { CheckCircle2, XCircle } from "lucide-react";
 import {
   Badge,
+  Button,
   Card,
   Skeleton,
   Table,
@@ -14,9 +16,11 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  toast,
 } from "@trylo/ui";
 import { useAdminDashboard } from "@trylo/mock-data/hooks";
 import { useAdminDriverEarningsList, useAdminWalletTransactions } from "@trylo/mock-data/hooks";
+import { useAdminPayouts, useProcessPayout, useRejectPayout } from "@trylo/mock-data/hooks";
 
 export default function AdminPaymentsPage() {
   const { data: stats } = useAdminDashboard();
@@ -47,6 +51,7 @@ export default function AdminPaymentsPage() {
         <TabsList>
           <TabsTrigger value="wallet">Wallet transactions</TabsTrigger>
           <TabsTrigger value="earnings">Driver earnings</TabsTrigger>
+          <TabsTrigger value="payouts">Payouts</TabsTrigger>
         </TabsList>
 
         <TabsContent value="wallet">
@@ -115,7 +120,10 @@ export default function AdminPaymentsPage() {
                     </TableCell>
                     <TableCell className="max-w-xs truncate">{entry.dropAddress}</TableCell>
                     <TableCell>{entry.distanceKm} km</TableCell>
-                    <TableCell className="text-success">+₹{entry.amount}</TableCell>
+                    <TableCell>
+                      <span className="text-success">+₹{entry.amount}</span>
+                      {entry.tip > 0 && <span className="ml-1 text-xs text-success">+₹{entry.tip} tip</span>}
+                    </TableCell>
                     <TableCell>{new Date(entry.createdAt).toLocaleDateString("en-IN")}</TableCell>
                   </TableRow>
                 ))}
@@ -130,7 +138,94 @@ export default function AdminPaymentsPage() {
             </Table>
           )}
         </TabsContent>
+
+        <TabsContent value="payouts">
+          <AdminPayoutsSection />
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function AdminPayoutsSection() {
+  const { data: payouts, isLoading } = useAdminPayouts();
+  const processPayout = useProcessPayout();
+  const rejectPayout = useRejectPayout();
+
+  async function handleProcess(id: string) {
+    try {
+      await processPayout.mutateAsync(id);
+      toast.success("Payout processed");
+    } catch {
+      toast.error("Failed to process payout");
+    }
+  }
+
+  async function handleReject(id: string) {
+    try {
+      await rejectPayout.mutateAsync(id);
+      toast.success("Payout rejected");
+    } catch {
+      toast.error("Failed to reject payout");
+    }
+  }
+
+  if (isLoading) return <Skeleton className="h-64 rounded-2xl" />;
+
+  if (!payouts || payouts.length === 0) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+        No payout requests yet.
+      </div>
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Driver</TableHead>
+          <TableHead>Amount</TableHead>
+          <TableHead>Bank (last 4)</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Requested</TableHead>
+          <TableHead className="text-right">Action</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {payouts.map((p) => {
+          const statusVariant = p.status === "processed" ? "success" : p.status === "failed" ? "destructive" : ("outline" as const);
+          return (
+            <TableRow key={p.id}>
+              <TableCell className="text-sm font-medium text-foreground">{p.driver.name}</TableCell>
+              <TableCell className="font-mono text-sm">₹{p.amount}</TableCell>
+              <TableCell className="text-sm text-muted-foreground">****{p.bankAccountLast4}</TableCell>
+              <TableCell>
+                <Badge variant={statusVariant}>{p.status}</Badge>
+              </TableCell>
+              <TableCell className="text-sm text-muted-foreground">
+                {new Date(p.initiatedAt).toLocaleDateString("en-IN")}
+              </TableCell>
+              <TableCell className="text-right">
+                {p.status === "pending" ? (
+                  <div className="flex justify-end gap-1">
+                    <Button size="sm" variant="outline" disabled={processPayout.isPending} onClick={() => handleProcess(p.id)}>
+                      <CheckCircle2 size={14} />
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={rejectPayout.isPending} onClick={() => handleReject(p.id)}>
+                      <XCircle size={14} />
+                    </Button>
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    {p.processedAt ? new Date(p.processedAt).toLocaleDateString("en-IN") : "—"}
+                  </span>
+                )}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }

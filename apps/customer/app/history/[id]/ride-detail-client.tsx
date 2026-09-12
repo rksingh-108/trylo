@@ -132,7 +132,7 @@ export default function RideDetailClient() {
         )}
         {Boolean(ride.tip) && (
           <div className="mt-2 flex justify-between text-sm">
-            <span className="text-muted-foreground">Tip (not yet supported — not charged)</span>
+            <span className="text-muted-foreground">{ride.tipSettled ? "Tip" : "Tip (not charged)"}</span>
             <span className="font-mono text-foreground">₹{ride.tip}</span>
           </div>
         )}

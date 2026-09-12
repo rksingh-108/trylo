@@ -58,10 +58,12 @@ export default function HomePage() {
 
   React.useEffect(() => {
     if (pickup) return;
-    // Set a sensible default immediately so the map has something to center on,
-    // then upgrade to the real GPS position + reverse-geocoded address once
-    // available (or silently keep the default if location access is denied).
-    setPickup({ address: "Current Location", point: CITY_CENTER });
+    // Never seed a fake "current location" — a hardcoded point (e.g. the city
+    // center) silently used as the real pickup would be sent to the backend as
+    // the rider's actual position if geolocation is denied/unavailable. Only a
+    // real GPS fix (reverse-geocoded) is ever set automatically; if it's not
+    // available the pickup stays null and the UI routes the rider through the
+    // search sheet / map picker instead (see handleDropSelect below).
     let cancelled = false;
     getCurrentLocationWithAddress().then((real) => {
       if (real && !cancelled) setPickup(real);
@@ -81,19 +83,41 @@ export default function HomePage() {
 
   function handleDropSelect(place: PlaceResult) {
     setDrop({ address: place.description, point: { lat: place.lat, lng: place.lng } });
-    setSheetOpen(false);
-    router.push("/booking");
+    setDropQuery(place.description);
+    if (pickup) {
+      setSheetOpen(false);
+      router.push("/booking");
+    } else {
+      // No real pickup yet (GPS denied/unavailable, nothing chosen) — never
+      // proceed to booking with a missing/fake pickup. Keep the sheet open and
+      // move focus to the pickup field so the rider sets a real one first; the
+      // ride continues to /booking automatically once it's set.
+      setSheetFocus("pickup");
+      setPickupQuery("");
+    }
   }
 
   function handleSavedPlaceSelect(address: string, point: GeoPoint) {
     setDrop({ address, point });
-    setSheetOpen(false);
-    router.push("/booking");
+    setDropQuery(address);
+    if (pickup) {
+      setSheetOpen(false);
+      router.push("/booking");
+    } else {
+      setSheetFocus("pickup");
+      setPickupQuery("");
+    }
   }
 
   function handlePickupSelect(place: PlaceResult) {
     setPickup({ address: place.description, point: { lat: place.lat, lng: place.lng } });
     setPickupQuery(place.description);
+    // The rider may have picked a destination first (drop set, pickup still
+    // missing) — once a real pickup is chosen, continue straight to booking.
+    if (drop) {
+      setSheetOpen(false);
+      router.push("/booking");
+    }
   }
 
   async function handleUseCurrentLocation(field: "pickup" | "drop") {
@@ -104,9 +128,18 @@ export default function HomePage() {
     if (field === "drop") {
       setDrop(real);
       setDropQuery(real.address);
+      // Drop without a pickup — switch focus so the rider sets a real pickup.
+      if (!pickup) {
+        setSheetFocus("pickup");
+        setPickupQuery("");
+      }
     } else {
       setPickup(real);
       setPickupQuery(real.address);
+      if (drop) {
+        setSheetOpen(false);
+        router.push("/booking");
+      }
     }
   }
 
@@ -123,6 +156,11 @@ export default function HomePage() {
     } else {
       setPickup(result);
       setPickupQuery(result.address);
+      if (drop) {
+        setMapPickerOpen(false);
+        router.push("/booking");
+        return;
+      }
     }
     setMapPickerOpen(false);
   }

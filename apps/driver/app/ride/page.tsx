@@ -30,6 +30,7 @@ import {
   useCancelDriverRide,
   useEndRide,
   useLiveNotifications,
+  useRateRider,
   useReportLiveLocation,
   useRideChat,
   useTriggerDriverSos,
@@ -76,6 +77,7 @@ export default function ActiveRidePage() {
   const { data: ride } = useActiveDriverRide();
   const verifyOtp = useVerifyRiderOtp();
   const endRide = useEndRide();
+  const rateRider = useRateRider();
   const cancelDriverRide = useCancelDriverRide();
   const liveGpsLocation = useReportLiveLocation(Boolean(ride));
   const triggerSos = useTriggerDriverSos();
@@ -151,7 +153,17 @@ export default function ActiveRidePage() {
   }
 
   if (completedRide) {
-    return <CompletedSummary ride={completedRide} onDone={() => router.push("/dashboard")} />;
+    return (
+      <CompletedSummary
+        ride={completedRide}
+        onDone={() => router.push("/dashboard")}
+        onRateRider={async (rating) => {
+          await rateRider.mutateAsync({ rideId: completedRide.id, rating });
+          setCompletedRide({ ...completedRide, riderRating: rating });
+        }}
+        isRatingRider={rateRider.isPending}
+      />
+    );
   }
 
   if (!ride) return <RideLoadingSkeleton />;
@@ -368,7 +380,17 @@ export default function ActiveRidePage() {
   );
 }
 
-function CompletedSummary({ ride, onDone }: { ride: Ride; onDone: () => void }) {
+function CompletedSummary({
+  ride,
+  onDone,
+  onRateRider,
+  isRatingRider,
+}: {
+  ride: Ride;
+  onDone: () => void;
+  onRateRider: (rating: number) => Promise<void>;
+  isRatingRider: boolean;
+}) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
       <span className="grid h-20 w-20 animate-scale-in place-items-center rounded-full bg-success/15">
@@ -422,12 +444,70 @@ function CompletedSummary({ ride, onDone }: { ride: Ride; onDone: () => void }) 
             <Clock3 size={13} /> {ride.durationMin} min
           </span>
           {ride.rating && <RatingStars value={ride.rating} size={13} />}
+          {Boolean(ride.tip) && ride.tipSettled && (
+            <span className="flex items-center gap-1 font-medium text-primary">+₹{ride.tip} tip</span>
+          )}
         </div>
+      </div>
+
+      <div className="w-full animate-slide-up rounded-2xl border border-border bg-card p-5 shadow-elevation-1">
+        <RateRiderRow
+          riderName={ride.rider?.name ?? "Your rider"}
+          existingRating={ride.riderRating}
+          onRate={onRateRider}
+          isPending={isRatingRider}
+        />
       </div>
 
       <Button size="lg" className="w-full" onClick={onDone}>
         Done
       </Button>
+    </div>
+  );
+}
+
+function RateRiderRow({
+  riderName,
+  existingRating,
+  onRate,
+  isPending,
+}: {
+  riderName: string;
+  existingRating?: number;
+  onRate: (rating: number) => Promise<void>;
+  isPending: boolean;
+}) {
+  const [draft, setDraft] = React.useState(existingRating ?? 5);
+  const [saved, setSaved] = React.useState(existingRating != null);
+
+  if (saved && existingRating != null) {
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">You rated {riderName.split(" ")[0]}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Ratings help keep the community safe.</p>
+        </div>
+        <RatingStars value={existingRating} size={18} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-sm font-medium text-foreground">How was {riderName.split(" ")[0]} as a rider?</p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <RatingStars value={draft} interactive size={26} onChange={setDraft} />
+        <Button
+          size="sm"
+          disabled={isPending}
+          onClick={async () => {
+            await onRate(draft);
+            setSaved(true);
+          }}
+        >
+          {isPending ? "Saving…" : "Rate rider"}
+        </Button>
+      </div>
     </div>
   );
 }

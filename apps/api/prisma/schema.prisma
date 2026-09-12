@@ -77,6 +77,7 @@ enum WalletTxnCategory {
   payout
   bonus
   cancellation_fee
+  tip
 }
 
 enum PayoutStatus {
@@ -100,6 +101,11 @@ enum PaymentStatus {
   pending
   paid
   failed
+}
+
+enum SupportStatus {
+  open
+  resolved
 }
 
 enum AdminActionTarget {
@@ -241,8 +247,16 @@ model Ride {
   /// reach completion (still in flight, or cancelled).
   paymentStatus PaymentStatus @default(pending)
 
+  /// Rider's rating of the driver, set once via the customer /rate endpoint.
   rating Int?
+  /// Optional rider tip for the driver, settled to the driver's earnings when
+  /// the rider rates the ride (see customerRide.routes.ts /rate).
   tip    Int?
+  /// Set the first time a tip is settled to the driver, so a re-submitted
+  /// rating can never settle the same tip twice.
+  tipSettledAt DateTime?
+  /// Driver's rating of the rider, set once via the driver rate-rider endpoint.
+  riderRating Int?
 
   statusHistory      RideStatusHistory[]
   walletTransactions WalletTransaction[]
@@ -354,7 +368,10 @@ model DriverEarning {
   driver    Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
   rideId    String   @unique
   ride      Ride     @relation(fields: [rideId], references: [id])
+  /// Fare amount settled to the driver for this ride.
   amount    Int
+  /// Rider tip settled to the driver for this ride (0 if none).
+  tip       Int      @default(0)
   createdAt DateTime @default(now())
 
   @@index([driverId])
@@ -400,18 +417,31 @@ model Session {
   revokedAt        DateTime?
 
   @@index([ownerId, ownerRole])
-}
-
-model Notification {
-  id        String    @id @default(cuid())
+}model Notification {
+  id        String   @id @default(cuid())
   ownerId   String
   ownerRole OwnerRole
   title     String
   body      String
-  read      Boolean   @default(false)
-  createdAt DateTime  @default(now())
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
 
   @@index([ownerId, ownerRole, read])
+}
+
+/// A support ticket raised by a customer or driver, resolved by an admin.
+model SupportTicket {
+  id         String          @id @default(cuid())
+  ownerId    String
+  ownerRole  OwnerRole
+  subject    String
+  message    String
+  status     SupportStatus   @default(open)
+  createdAt  DateTime        @default(now())
+  resolvedAt DateTime?
+
+  @@index([ownerId, ownerRole])
+  @@index([status])
 }
 
 model PromoCode {

@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import type { FareBreakdown, PromoCode, VehicleType } from "@trylo/types";
 
 interface FareRate {
@@ -40,10 +41,61 @@ export const fareRates: Record<VehicleType, FareRate> = {
   },
 };
 
-export const promoCodes: PromoCode[] = [
+/**
+ * The initial promo codes, seeded into the PromoCode table on first boot (see
+ * seedPromoCodes below). After that, the database is the source of truth:
+ * admins create/edit/deactivate codes via the admin API and every lookup reads
+ * from the DB, so the platform isn't stuck with a hardcoded list forever.
+ */
+export const defaultPromoCodes: PromoCode[] = [
   { code: "TRYLO50", description: "50% off, up to ₹50", discountPercent: 50, maxDiscount: 50 },
   { code: "FIRSTRIDE", description: "20% off on your first ride", discountPercent: 20, maxDiscount: 100 },
 ];
+
+/**
+ * Seeds the default promo codes on first boot if the table is empty. Called
+ * from index.ts at startup — never on the hot path. If the table already has
+ * rows (an admin created or edited codes), the defaults are left alone.
+ */
+export async function seedPromoCodes(db: PrismaClient): Promise<void> {
+  try {
+    const existing = await db.promoCode.count();
+    if (existing > 0) return;
+    await db.promoCode.createMany({
+      data: defaultPromoCodes.map((p) => ({
+        code: p.code,
+        discountPercent: p.discountPercent,
+        maxDiscount: p.maxDiscount,
+        active: true,
+      })),
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[fare] failed to seed default promo codes", err);
+  }
+}
+
+/**
+ * Loads the active promo codes from the database. The hardcoded defaults are a
+ * last-resort fallback only (e.g. the table was never seeded because of a
+ * transient DB hiccup at boot), so existing behavior is never silently worse.
+ */
+export async function loadActivePromoCodes(db: PrismaClient): Promise<PromoCode[]> {
+  try {
+    const rows = await db.promoCode.findMany({ where: { active: true } });
+    if (rows.length === 0) return defaultPromoCodes;
+    return rows.map((p) => ({
+      code: p.code,
+      description: `${p.discountPercent}% off${p.maxDiscount ? `, up to ₹${p.maxDiscount}` : ""}`,
+      discountPercent: p.discountPercent,
+      maxDiscount: p.maxDiscount ?? 0,
+    }));
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[fare] failed to load promo codes, falling back to defaults", err);
+    return defaultPromoCodes;
+  }
+}
 
 export function computeFare(
   vehicleType: VehicleType,

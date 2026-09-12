@@ -49,6 +49,10 @@ export interface Ride {
   cancelledBy?: "customer" | "driver";
   rating?: number;
   tip?: number;
+  /** True once the rider's tip has actually been settled to the driver's earnings. */
+  tipSettled?: boolean;
+  /** Driver's rating of the rider, set via the driver rate-rider endpoint. */
+  riderRating?: number;
   /**
    * 'pending' until the ride completes; then 'paid' once the fare is debited from
    * the rider's wallet, or 'failed' if the wallet balance was insufficient. Stays
