@@ -26,7 +26,8 @@ export default function DashboardPage() {
   const router = useRouter();
   const { data: summary } = useDashboardSummary();
   const setOnlineStatus = useSetOnlineStatus();
-  const isOnline = summary?.isOnline ?? false;
+  const [optimisticOnline, setOptimisticOnline] = React.useState<boolean | null>(null);
+  const isOnline = optimisticOnline ?? summary?.isOnline ?? false;
 
   // The driver's active ride is looked up purely by driver identity server-side
   // (no client-stored ride id needed), so a fresh app launch mid-ride (browser/PWA
@@ -41,8 +42,18 @@ export default function DashboardPage() {
   const { data: offer } = useIncomingRequest(isOnline);
 
   function handleToggle(next: boolean) {
+    // Optimistically update the UI immediately so the toggle responds instantly.
+    setOptimisticOnline(next);
     setOnlineStatus.mutate(next, {
+      onSuccess: () => {
+        // Server confirmed — clear optimistic override and let the refetched
+        // dashboard data take over (the invalidateQueries in useSetOnlineStatus
+        // already triggered a refetch).
+        setOptimisticOnline(null);
+      },
       onError: () => {
+        // Revert the optimistic update on failure.
+        setOptimisticOnline(null);
         toast.error(next ? "Couldn't go online" : "Couldn't go offline", {
           description: "Please try again in a moment.",
         });
