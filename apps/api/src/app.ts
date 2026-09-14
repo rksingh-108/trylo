@@ -36,6 +36,10 @@ import { createSupportRouter } from "./routes/support.routes";
 export function createApp() {
   const app = express();
 
+  // Trust first proxy hop (Azure Container Apps ingress / reverse proxy)
+  // so req.ip reflects the real client IP for rate-limiting and logging.
+  app.set("trust proxy", 1);
+
   app.disable("x-powered-by");
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
   app.use(cors({ origin: env.corsOrigins }));
