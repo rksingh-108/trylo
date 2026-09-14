@@ -152,10 +152,26 @@ async function createRide(customerToken: string, pickup: { address: string; poin
   return rideRes.data.id;
 }
 
+/**
+ * Re-reports a driver's position, as the live driver app does every ~3s.
+ *
+ * The matcher only considers drivers whose last fix is under 45s old
+ * (LOCATION_STALE_MS). The suite runs for minutes, so a driver who reported a
+ * location once at the start silently ages out of matching partway through and
+ * the next scenario fails with "driver accepts <ride>" timing out. Previously
+ * this went unnoticed because new drivers were seeded with a fresh timestamp
+ * near the city centre and stayed permanently "fresh" until it drifted.
+ */
+async function reportDriverLocation(driverToken: string, lat = 12.9716, lng = 77.5946) {
+  await api("/api/driver/location", { method: "POST", token: driverToken, body: { lat, lng, accuracy: 10 } });
+}
+
 /** Drives a ride from 'requested' through acceptance and OTP verification to 'in_progress'. */
 async function progressRideToInProgress(customerToken: string, driverToken: string, rideId: string) {
   await waitFor(
     async () => {
+      // Keep the driver inside the matcher's freshness window while we poll.
+      await reportDriverLocation(driverToken);
       const acc = await api<{ status: string }>(`/api/driver/requests/${rideId}/accept`, { method: "POST", token: driverToken });
       return acc.status === 200 && acc.data ? acc : null;
     },
@@ -229,6 +245,7 @@ async function runCancellationScenarios() {
   const ride2 = await createRide(customerToken, pickup, drop);
   const accepted2 = await waitFor(
     async () => {
+      await reportDriverLocation(driverToken);
       const acc = await api<{ status: string }>(`/api/driver/requests/${ride2}/accept`, { method: "POST", token: driverToken });
       return acc.status === 200 && acc.data ? acc : null;
     },
@@ -260,6 +277,7 @@ async function runCancellationScenarios() {
   const ride3 = await createRide(customerToken, pickup, drop);
   await waitFor(
     async () => {
+      await reportDriverLocation(driverToken);
       const acc = await api<{ status: string }>(`/api/driver/requests/${ride3}/accept`, { method: "POST", token: driverToken });
       return acc.status === 200 && acc.data ? acc : null;
     },
@@ -296,6 +314,7 @@ async function runCancellationScenarios() {
   const ride4 = await createRide(customerToken, pickup, drop);
   await waitFor(
     async () => {
+      await reportDriverLocation(driverToken);
       const acc = await api<{ status: string }>(`/api/driver/requests/${ride4}/accept`, { method: "POST", token: driverToken });
       return acc.status === 200 && acc.data ? acc : null;
     },
@@ -351,6 +370,7 @@ async function runCancellationScenarios() {
   const ride5 = await createRide(customerToken, pickup, drop);
   await waitFor(
     async () => {
+      await reportDriverLocation(driverToken);
       const acc = await api<{ status: string }>(`/api/driver/requests/${ride5}/accept`, { method: "POST", token: driverToken });
       return acc.status === 200 && acc.data ? acc : null;
     },
@@ -931,8 +951,8 @@ async function runAdminScenarios() {
   assert(ridesTrend.status === 200, "admin can load the rides analytics trend");
 }
 
-// Fixed reference point (matches the CITY_CENTER used to jitter-seed new
-// drivers elsewhere in this file), so the km offsets below are known distances.
+// Fixed reference point (matches CITY_CENTER in apps/api/src/lib/geo.ts), so
+// the km offsets below are known distances.
 const GEO_PICKUP = { lat: 12.9716, lng: 77.5946 };
 const GEO_KM_TO_DEG_LAT = 1 / 111.32;
 
@@ -1257,6 +1277,7 @@ async function runConcurrentArrivalScenario() {
 
   await waitFor(
     async () => {
+      await reportDriverLocation(driverToken);
       const acc = await api<{ status: string }>(`/api/driver/requests/${rideId}/accept`, { method: "POST", token: driverToken });
       return acc.status === 200 && acc.data ? acc : null;
     },
@@ -1342,6 +1363,7 @@ async function runArrivalConfirmationConcurrencyScenario() {
 
   await waitFor(
     async () => {
+      await reportDriverLocation(driverToken);
       const acc = await api<{ status: string }>(`/api/driver/requests/${rideId}/accept`, { method: "POST", token: driverToken });
       return acc.status === 200 && acc.data ? acc : null;
     },
@@ -1431,11 +1453,43 @@ async function run() {
   });
   assert(custProfile.status === 200 && !!custProfile.data.id, "customer profile completed");
 
+  // Saved places start empty: they used to be seeded with a fabricated
+  // "Home"/"Work" pair at random coordinates near the city centre, which meant
+  // a rider tapping "Work" was sent somewhere they had never been. They're now
+  // created only from an address the rider actually picks.
   const savedPlaces = await api<unknown[]>("/api/customer/saved-places", { token: customerToken });
-  assert(savedPlaces.data.length === 2, "default saved places (Home/Work) seeded");
+  assert(savedPlaces.data.length === 0, "no fabricated saved places on a new account");
+
+  const savedPlaceCreated = await api<{ id: string; point: { lat: number; lng: number } }>(
+    "/api/customer/saved-places",
+    {
+      method: "POST",
+      token: customerToken,
+      body: {
+        label: "home",
+        name: "Home",
+        address: "Kempegowda International Airport, Devanahalli",
+        lat: 13.1986,
+        lng: 77.7066,
+      },
+    }
+  );
+  assert(savedPlaceCreated.status === 201, "rider can save a real address");
+  assert(
+    savedPlaceCreated.data.point.lat === 13.1986 && savedPlaceCreated.data.point.lng === 77.7066,
+    "saved place keeps the coordinates the rider picked (not a jittered point)"
+  );
+  const savedHomeAgain = await api<{ id: string }>("/api/customer/saved-places", {
+    method: "POST",
+    token: customerToken,
+    body: { label: "home", name: "Home", address: "Cubbon Park, Bengaluru", lat: 12.9763, lng: 77.5929 },
+  });
+  assert(savedHomeAgain.data.id === savedPlaceCreated.data.id, "Home is a single slot and is replaced in place");
+  const savedAfterReplace = await api<unknown[]>("/api/customer/saved-places", { token: customerToken });
+  assert(savedAfterReplace.data.length === 1, "saving Home twice does not duplicate it");
 
   const paymentMethods = await api<unknown[]>("/api/customer/payment-methods", { token: customerToken });
-  assert(paymentMethods.data.length === 3, "default payment methods (UPI/Card/Cash) seeded");
+  assert(paymentMethods.data.length === 1, "only the platform-wide cash option is seeded, no invented UPI/card");
 
   // Top up the wallet so the ride-completion debit is verifiable later.
   const topUp = await api<{ balance: number }>("/api/customer/wallet/topup", {
@@ -1511,6 +1565,18 @@ async function run() {
     body: { isOnline: true },
   });
   assert(online.data.isOnline === true, "driver toggled online");
+
+  // A driver is only matchable once they've reported a location: the matcher
+  // requires a non-null `locationUpdatedAt` fresher than 45s. This used to pass
+  // without it solely because new drivers were seeded at a random point near
+  // the city centre with a fresh timestamp - i.e. the test was exercising a
+  // fabricated position. The driver app pushes a real fix before going online,
+  // so the suite does the same (this is also the pickup point below).
+  await api("/api/driver/location", {
+    method: "POST",
+    token: driverToken,
+    body: { lat: 12.9716, lng: 77.5946, accuracy: 10 },
+  });
 
   const driverMe = await api<{ id: string }>("/api/driver/auth/me", { token: driverToken });
   const driverId = driverMe.data.id;

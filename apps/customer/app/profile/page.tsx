@@ -11,7 +11,9 @@ import {
   MapPin,
   Palette,
   Pencil,
+  Plus,
   QrCode,
+  Trash2,
   Wallet,
 } from "lucide-react";
 import {
@@ -30,18 +32,22 @@ import {
   Input,
   Label,
   PageTransition,
+  PlaceAutocomplete,
   RatingStars,
   SupportDialog,
   ThemeToggle,
   toast,
+  type PlaceResult,
 } from "@trylo/ui";
 import {
   useCompleteProfile,
   useCreateSupportTicket,
   useCurrentUser,
+  useDeleteSavedPlace,
   useLogout,
   usePaymentMethods,
   useSavedPlaces,
+  useSaveSavedPlace,
   useSupportTickets,
 } from "@trylo/mock-data/hooks";
 import type { PaymentMethod, SavedPlaceLabel } from "@trylo/types";
@@ -73,6 +79,15 @@ export default function ProfilePage() {
   const { data: user } = useCurrentUser();
   const { data: savedPlaces } = useSavedPlaces();
   const { data: paymentMethods } = usePaymentMethods();
+  const savePlace = useSaveSavedPlace();
+  const deletePlace = useDeleteSavedPlace();
+  // Saved places are edited with a real geocoded address (the search box below
+  // is backed by OpenStreetMap), never a canned one — the previous seed rows
+  // pointed at random coordinates that had nothing to do with the rider.
+  const [placeDialogOpen, setPlaceDialogOpen] = React.useState(false);
+  const [placeLabel, setPlaceLabel] = React.useState<SavedPlaceLabel>("home");
+  const [placeQuery, setPlaceQuery] = React.useState("");
+  const [placeSelection, setPlaceSelection] = React.useState<PlaceResult | null>(null);
   const logout = useLogout();
   const supportTickets = useSupportTickets("customer");
   const createTicket = useCreateSupportTicket("customer");
@@ -97,6 +112,53 @@ export default function ProfilePage() {
     } catch {
       toast.error("Couldn't save your profile. Try again.");
     }
+  }
+
+  function openPlaceDialog(label: SavedPlaceLabel) {
+    setPlaceLabel(label);
+    setPlaceQuery("");
+    setPlaceSelection(null);
+    setPlaceDialogOpen(true);
+  }
+
+  function handleSavePlace() {
+    if (!placeSelection) {
+      toast.error("Choose an address first", { description: "Pick one from the suggestions list." });
+      return;
+    }
+    const name =
+      placeLabel === "home" ? "Home" : placeLabel === "work" ? "Work" : placeSelection.description.split(",")[0]?.trim() || "Saved place";
+    savePlace.mutate(
+      {
+        label: placeLabel,
+        name,
+        address: placeSelection.description,
+        lat: placeSelection.lat,
+        lng: placeSelection.lng,
+      },
+      {
+        onSuccess: () => {
+          toast.success(`${name} saved`);
+          setPlaceDialogOpen(false);
+        },
+        onError: (error) => {
+          toast.error("Couldn't save that place", {
+            description: error instanceof Error ? error.message : undefined,
+          });
+        },
+      }
+    );
+  }
+
+  function handleDeletePlace(id: string, name: string) {
+    deletePlace.mutate(id, {
+      onSuccess: () => toast.success(`${name} removed`),
+      onError: (error) => {
+        toast.error("Couldn't remove that place", {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      },
+    });
   }
 
   function handleLogout() {
@@ -168,12 +230,24 @@ export default function ProfilePage() {
 
       {/* Saved places */}
       <div className="mt-6">
-        <p className="mb-2 text-sm font-medium text-foreground">Saved places</p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">Saved places</p>
+          <Button type="button" size="sm" variant="ghost" onClick={() => openPlaceDialog("home")}>
+            <Plus size={14} />
+            Add
+          </Button>
+        </div>
         {savedPlaces && savedPlaces.length === 0 ? (
           <EmptyState
             icon={<MapPin />}
             title="No saved places"
             description="Save home and work to book rides faster."
+            action={
+              <Button type="button" size="sm" variant="glow" onClick={() => openPlaceDialog("home")}>
+                <Plus size={14} />
+                Add a place
+              </Button>
+            }
             className="rounded-xl border border-border bg-card py-10"
           />
         ) : (
@@ -189,12 +263,94 @@ export default function ProfilePage() {
                     <p className="text-sm font-medium text-foreground">{place.name}</p>
                     <p className="truncate text-xs text-muted-foreground">{place.address}</p>
                   </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0 px-0"
+                    aria-label={`Change ${place.name}`}
+                    disabled={savePlace.isPending || deletePlace.isPending}
+                    onClick={() => openPlaceDialog(place.label)}
+                  >
+                    <Pencil size={15} />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0 px-0"
+                    aria-label={`Remove ${place.name}`}
+                    disabled={deletePlace.isPending}
+                    onClick={() => handleDeletePlace(place.id, place.name)}
+                  >
+                    <Trash2 size={15} />
+                  </Button>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Saved place editor — the address comes from the real OSM-backed search */}
+      <Dialog open={placeDialogOpen} onOpenChange={setPlaceDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {placeLabel === "home" ? "Home address" : placeLabel === "work" ? "Work address" : "Saved address"}
+            </DialogTitle>
+            <DialogDescription>
+              Search and pick the exact address — we'll use its real coordinates when you book.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex gap-2">
+            {(["home", "work", "other"] as SavedPlaceLabel[]).map((label) => (
+              <Button
+                key={label}
+                type="button"
+                size="sm"
+                variant={placeLabel === label ? "glow" : "outline"}
+                onClick={() => setPlaceLabel(label)}
+              >
+                {label === "home" ? "Home" : label === "work" ? "Work" : "Other"}
+              </Button>
+            ))}
+          </div>
+
+          <PlaceAutocomplete
+            value={placeQuery}
+            onChange={(value) => {
+              setPlaceQuery(value);
+              setPlaceSelection(null);
+            }}
+            onSelect={(place) => {
+              setPlaceSelection(place);
+              setPlaceQuery(place.description);
+            }}
+            placeholder="Search for an address"
+            autoFocus
+            open={placeDialogOpen}
+          />
+
+          {placeSelection && (
+            <p className="text-xs text-muted-foreground">
+              Will be saved as: {placeSelection.description}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="ghost">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="button" variant="glow" disabled={!placeSelection || savePlace.isPending} onClick={handleSavePlace}>
+              {savePlace.isPending ? "Saving..." : "Save place"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Payment methods */}
       <div className="mt-6">

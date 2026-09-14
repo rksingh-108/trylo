@@ -4,9 +4,11 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Clock3, TrendingUp, User, Wallet, Zap } from "lucide-react";
+import { Clock3, MapPinOff, TrendingUp, User, Wallet, Zap } from "lucide-react";
 import { AnimatedCounter, Card, PremiumMap, RatingStars, Switch, toast } from "@trylo/ui";
 import {
+  acquireAndReportCurrentLocation,
+  reportLocationFix,
   useActiveDriverRide,
   useDashboardSummary,
   useIncomingRequest,
@@ -22,12 +24,40 @@ function formatOnlineDuration(minutes: number) {
   return `${hours}h ${rest}m`;
 }
 
+/**
+ * How old a cached fix may be before we insist on a fresh GPS lock instead of
+ * just re-posting it. Kept comfortably inside the backend's 45s matching
+ * freshness window (LOCATION_STALE_MS in apps/api/src/matching/matcher.ts).
+ */
+const LOCATION_FIX_MAX_AGE_MS = 15_000;
+
+function locationErrorMessage(error: unknown) {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    switch ((error as GeolocationPositionError).code) {
+      case 1:
+        return "Allow location access for TRYLO Driver in your device or browser settings, then try again.";
+      case 2:
+        return "We couldn't get a GPS fix. Move somewhere with a clearer view of the sky and try again.";
+      case 3:
+        return "Getting your location timed out. Please try again.";
+    }
+  }
+  return error instanceof Error ? error.message : "Please try again in a moment.";
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { data: summary } = useDashboardSummary();
   const setOnlineStatus = useSetOnlineStatus();
-  const [optimisticOnline, setOptimisticOnline] = React.useState<boolean | null>(null);
-  const isOnline = optimisticOnline ?? summary?.isOnline ?? false;
+  // `summary.isOnline` is updated optimistically inside useSetOnlineStatus (the
+  // cached dashboard row is rewritten before the request even leaves), so this
+  // stays correct without any local mirror state to keep in sync.
+  const isOnline = summary?.isOnline ?? false;
+  // Watch from mount (not gated on isOnline) so the permission prompt is
+  // resolved before the driver ever taps Online, and so the map has a position
+  // ready; fixes are only streamed to the backend while actually online.
+  const [locationRetryToken, setLocationRetryToken] = React.useState(0);
+  const liveLocation = useReportLiveLocation(true, isOnline, locationRetryToken);
 
   // The driver's active ride is looked up purely by driver identity server-side
   // (no client-stored ride id needed), so a fresh app launch mid-ride (browser/PWA
@@ -41,28 +71,57 @@ export default function DashboardPage() {
 
   const { data: offer } = useIncomingRequest(isOnline);
 
+  /**
+   * Best-effort push of the driver's location, run when they go online.
+   *
+   * The matcher only considers drivers whose last fix is under 45s old, so
+   * without this the driver can sit "online" and never be offered a ride. It is
+   * deliberately NOT awaited by the toggle: a device whose GPS never calls back
+   * would otherwise leave the switch stuck mid-interaction, which reads to the
+   * driver as "the online toggle is broken". The watch keeps retrying anyway,
+   * and a failure is surfaced as both a toast and the banner below.
+   */
+  async function pushLocationWhenGoingOnline() {
+    try {
+      const cachedFixIsFresh =
+        liveLocation.status === "live" &&
+        liveLocation.position !== null &&
+        liveLocation.lastFixAt !== null &&
+        Date.now() - liveLocation.lastFixAt < LOCATION_FIX_MAX_AGE_MS;
+      if (cachedFixIsFresh) {
+        await reportLocationFix(liveLocation.position!);
+      } else {
+        await acquireAndReportCurrentLocation();
+      }
+    } catch (error) {
+      toast.error("We can't see your location", {
+        description: locationErrorMessage(error),
+      });
+    }
+  }
+
   function handleToggle(next: boolean) {
-    // Optimistically update the UI immediately so the toggle responds instantly.
-    setOptimisticOnline(next);
+    if (next) void pushLocationWhenGoingOnline();
     setOnlineStatus.mutate(next, {
-      onSuccess: () => {
-        // Server confirmed — clear optimistic override and let the refetched
-        // dashboard data take over (the invalidateQueries in useSetOnlineStatus
-        // already triggered a refetch).
-        setOptimisticOnline(null);
-      },
-      onError: () => {
-        // Revert the optimistic update on failure.
-        setOptimisticOnline(null);
+      onError: (error) => {
+        // The mutation rolls the cached summary back to its previous value; all
+        // that's left is to tell the driver why the switch didn't stick.
         toast.error(next ? "Couldn't go online" : "Couldn't go offline", {
-          description: "Please try again in a moment.",
+          description: error instanceof Error ? error.message : "Please try again in a moment.",
         });
       },
     });
   }
 
-  const liveGpsLocation = useReportLiveLocation(isOnline);
+  const liveGpsLocation = liveLocation.position;
   const driverLocation = liveGpsLocation ?? summary?.driver?.location;
+  // Being "online" while the device isn't actually reporting a position is the
+  // worst possible state for a driver: the switch looks fine but no ride can
+  // ever be matched. Say so explicitly rather than showing "Live location".
+  const locationBlocked =
+    liveLocation.status === "denied" ||
+    liveLocation.status === "unavailable" ||
+    liveLocation.status === "unsupported";
 
   return (
     <div className="flex flex-1 flex-col pb-6">
@@ -118,7 +177,11 @@ export default function DashboardPage() {
                   {isOnline ? "You're online" : "You're offline"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {isOnline ? "Looking for ride requests nearby" : "Go online to start receiving requests"}
+                  {isOnline
+                    ? locationBlocked
+                      ? "No requests until we can see your location"
+                      : "Looking for ride requests nearby"
+                    : "Go online to start receiving requests"}
                 </p>
               </div>
             </div>
@@ -131,6 +194,43 @@ export default function DashboardPage() {
           </div>
         </motion.div>
       </div>
+
+      {locationBlocked && (
+        <div className="mt-3 px-5">
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-3.5"
+          >
+            <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-destructive/10">
+              <MapPinOff size={16} className="text-destructive" />
+            </span>
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                {isOnline ? "You're online, but we can't see your location" : "Location access is off"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {liveLocation.status === "unsupported"
+                  ? "This device doesn't support location. Ride requests need a recent GPS fix."
+                  : "Ride requests are matched by distance, so you won't be offered any until location access is allowed and a GPS fix comes through."}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  // Re-establish the watch (a fresh watchPosition re-queries
+                  // permission state, which getCurrentPosition alone doesn't).
+                  setLocationRetryToken((token) => token + 1);
+                  acquireAndReportCurrentLocation().catch((error) => {
+                    toast.error("Still no location", { description: locationErrorMessage(error) });
+                  });
+                }}
+                className="mt-2 text-xs font-semibold text-primary underline-offset-4 hover:underline"
+              >
+                Retry location access
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Live map preview */}
       <div className="mt-4 px-5">
@@ -150,9 +250,11 @@ export default function DashboardPage() {
           >
             <div className="glass-strong absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground shadow-elevation-2">
               <span
-                className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-primary animate-pulse" : "bg-muted-foreground"}`}
+                className={`h-1.5 w-1.5 rounded-full ${
+                  locationBlocked ? "bg-destructive" : isOnline ? "bg-primary animate-pulse" : "bg-muted-foreground"
+                }`}
               />
-              {isOnline ? "Live location" : "Location paused"}
+              {locationBlocked ? "Location off" : isOnline ? "Live location" : "Location paused"}
             </div>
           </PremiumMap>
         </div>

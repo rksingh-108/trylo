@@ -10,9 +10,9 @@ import { serializeDriver } from "../lib/serialize";
 
 const router = Router();
 
-router.get("/addresses/search", requireAuth("customer"), (req, res) => {
+router.get("/addresses/search", requireAuth("customer"), async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q : "";
-  res.json(searchAddressSuggestions(q));
+  res.json(await searchAddressSuggestions(q));
 });
 
 router.get("/nearby-drivers", requireAuth("customer"), async (req, res) => {
@@ -28,17 +28,63 @@ router.get("/nearby-drivers", requireAuth("customer"), async (req, res) => {
   res.json(drivers.map(serializeDriver));
 });
 
+function serializeSavedPlace(p: { id: string; label: string; name: string; address: string; lat: number; lng: number }) {
+  return { id: p.id, label: p.label, name: p.name, address: p.address, point: { lat: p.lat, lng: p.lng } };
+}
+
 router.get("/saved-places", requireAuth("customer"), async (req, res) => {
   const places = await db.savedPlace.findMany({ where: { userId: req.auth!.id } });
-  res.json(
-    places.map((p) => ({
-      id: p.id,
-      label: p.label,
-      name: p.name,
-      address: p.address,
-      point: { lat: p.lat, lng: p.lng },
-    }))
-  );
+  res.json(places.map(serializeSavedPlace));
+});
+
+// Saved places had no write path at all before this: the only ones that ever
+// existed were the fabricated Home/Work rows seeded on profile save. The rider
+// now supplies a real address (chosen in the app's search box), and it's those
+// coordinates that get stored and later used as a booking destination.
+const savedPlaceSchema = z.object({
+  label: z.enum(["home", "work", "other"]),
+  name: z.string().min(1).max(60),
+  address: z.string().min(3).max(300),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
+router.post("/saved-places", requireAuth("customer"), async (req, res) => {
+  const parsed = savedPlaceSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid saved place" });
+    return;
+  }
+  const { label, name, address, lat, lng } = parsed.data;
+
+  // Home and Work are single-slot: saving a new one replaces the old, which is
+  // what a rider expects from "change my home address".
+  if (label !== "other") {
+    const existing = await db.savedPlace.findFirst({ where: { userId: req.auth!.id, label } });
+    if (existing) {
+      const updated = await db.savedPlace.update({
+        where: { id: existing.id },
+        data: { name, address, lat, lng },
+      });
+      res.json(serializeSavedPlace(updated));
+      return;
+    }
+  }
+
+  const created = await db.savedPlace.create({
+    data: { userId: req.auth!.id, label, name, address, lat, lng },
+  });
+  res.status(201).json(serializeSavedPlace(created));
+});
+
+router.delete("/saved-places/:id", requireAuth("customer"), async (req, res) => {
+  // Scoped to the caller so one rider can't delete another's saved place.
+  const { count } = await db.savedPlace.deleteMany({ where: { id: req.params.id, userId: req.auth!.id } });
+  if (count === 0) {
+    res.status(404).json({ error: "Saved place not found" });
+    return;
+  }
+  res.status(204).end();
 });
 
 router.get("/payment-methods", requireAuth("customer"), async (req, res) => {

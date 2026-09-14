@@ -6,7 +6,7 @@ import { signToken } from "../auth/jwt";
 import { requireAuth } from "../auth/middleware";
 import { issueRefreshToken } from "../auth/refreshToken";
 import { serializeDriver, serializeKycDocument } from "../lib/serialize";
-import { CITY_CENTER, jitter } from "../lib/geo";
+import { CITY_CENTER } from "../lib/geo";
 import { autoVerifyPendingDocs } from "../lib/kyc";
 
 const router = Router();
@@ -48,9 +48,16 @@ router.post("/otp/verify", async (req, res) => {
   let driver = await db.driver.findUnique({ where: { phone } });
   const isNewDriver = !driver;
   if (!driver) {
-    const location = jitter(CITY_CENTER, 3);
+    // A brand new driver has no location yet. They used to be created at
+    // `jitter(CITY_CENTER, 3)` — a random point up to 3km from the city centre —
+    // with `locationUpdatedAt` set to now(), which made a never-seen driver look
+    // like a fresh, real GPS fix and put them in range of real ride requests.
+    // `lat`/`lng` are NOT NULL, so seed the neutral centre as an unset
+    // placeholder and leave `locationUpdatedAt` null: the matcher requires a
+    // non-null, recent `locationUpdatedAt`, so an unreported location keeps the
+    // driver out of matching until they actually share one.
     driver = await db.driver.create({
-      data: { phone, lat: location.lat, lng: location.lng, locationUpdatedAt: new Date() },
+      data: { phone, lat: CITY_CENTER.lat, lng: CITY_CENTER.lng, locationUpdatedAt: null },
     });
     await db.kycDocument.createMany({
       data: KYC_DOC_DEFS.map((d) => ({ driverId: driver!.id, type: d.type, label: d.label })),

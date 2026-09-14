@@ -148,6 +148,7 @@ async function run() {
   log("'Ride requested' notification persisted for customer", true);
 
   await waitFor(async () => {
+    await api("/api/driver/location", { method: "POST", token: driver.token, body: PICKUP.point });
     const acc = await api<{ status: string }>(`/api/driver/requests/${rideId}/accept`, { method: "POST", token: driver.token });
     return acc.status === 200 && acc.data ? acc : null;
   }, "driver accepts ride", 10000);
@@ -214,6 +215,7 @@ async function run() {
   driverSocket.off("ride:message:new");
 
   await waitFor(async () => {
+    await api("/api/driver/location", { method: "POST", token: driver.token, body: PICKUP.point });
     const acc = await api<{ status: string }>(`/api/driver/requests/${chatRide2}/accept`, { method: "POST", token: driver.token });
     return acc.status === 200 && acc.data ? acc : null;
   }, "driver accepts chat-test ride", 10000);
@@ -266,6 +268,7 @@ async function run() {
   // 3b. Late cancellation (after driver accepted) - fee charged.
   const lateCancelRide = await createRide(customer.token);
   await waitFor(async () => {
+    await api("/api/driver/location", { method: "POST", token: driver.token, body: PICKUP.point });
     const acc = await api<{ status: string }>(`/api/driver/requests/${lateCancelRide}/accept`, { method: "POST", token: driver.token });
     return acc.status === 200 && acc.data ? acc : null;
   }, "driver accepts late-cancel-test ride", 10000);
@@ -294,6 +297,9 @@ async function run() {
   const poorCustomer = await onboardCustomer(`8${suffix}4`, 5); // only ₹5, less than the ₹20 fee
   const poorRideId = await createRide(poorCustomer.token);
   await waitFor(async () => {
+    // Re-report the driver's position: the matcher ignores a fix older than 45s,
+    // and this scenario runs minutes after the driver first went online.
+    await api("/api/driver/location", { method: "POST", token: driver.token, body: PICKUP.point });
     const acc = await api<{ status: string }>(`/api/driver/requests/${poorRideId}/accept`, { method: "POST", token: driver.token });
     return acc.status === 200 && acc.data ? acc : null;
   }, "driver accepts insufficient-balance-test ride", 10000);
@@ -309,6 +315,7 @@ async function run() {
   const sosRide = await createRide(customer.token);
   customerSocket.emit("join:ride", sosRide);
   await waitFor(async () => {
+    await api("/api/driver/location", { method: "POST", token: driver.token, body: PICKUP.point });
     const acc = await api<{ status: string }>(`/api/driver/requests/${sosRide}/accept`, { method: "POST", token: driver.token });
     return acc.status === 200 && acc.data ? acc : null;
   }, "driver accepts SOS-test ride", 10000);

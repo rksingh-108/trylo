@@ -79,7 +79,9 @@ export default function ActiveRidePage() {
   const endRide = useEndRide();
   const rateRider = useRateRider();
   const cancelDriverRide = useCancelDriverRide();
-  const liveGpsLocation = useReportLiveLocation(Boolean(ride));
+  // Report for the whole time a ride is in hand (show up, wait, drive), so the
+  // rider's map keeps tracking and arrival detection keeps receiving fixes.
+  const liveGpsLocation = useReportLiveLocation(Boolean(ride)).position;
   const triggerSos = useTriggerDriverSos();
   const { messages: chatMessages, send: sendChatMessage } = useRideChat(ride?.id ?? null, getDriverRideMessages);
 

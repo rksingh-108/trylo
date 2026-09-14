@@ -5,7 +5,7 @@ import { createOtpChallenge, verifyOtpChallenge } from "../auth/otp";
 import { signToken } from "../auth/jwt";
 import { requireAuth } from "../auth/middleware";
 import { issueRefreshToken } from "../auth/refreshToken";
-import { defaultPaymentMethods, defaultSavedPlaces } from "../lib/addresses";
+import { defaultPaymentMethods } from "../lib/addresses";
 
 const router = Router();
 
@@ -76,20 +76,12 @@ router.post("/profile", requireAuth("customer"), async (req, res) => {
     data: { name: parsed.data.name, email: parsed.data.email },
   });
 
-  const existingPlaces = await db.savedPlace.count({ where: { userId: user.id } });
-  if (existingPlaces === 0) {
-    await db.savedPlace.createMany({
-      data: defaultSavedPlaces.map((p) => ({
-        userId: user.id,
-        label: p.label,
-        name: p.name,
-        address: p.address,
-        lat: p.point.lat,
-        lng: p.point.lng,
-      })),
-    });
-  }
-
+  // Saved places are deliberately NOT seeded. They used to be filled with a
+  // fabricated "Home"/"Work" pair whose coordinates were random points near the
+  // city centre, which meant a rider tapping "Work" was taken to a place they
+  // had never been. They're now created only from an address the rider actually
+  // picks (POST /api/customer/saved-places), so an empty list here is the
+  // honest state for a new account.
   const existingMethods = await db.paymentMethod.count({ where: { userId: user.id } });
   if (existingMethods === 0) {
     await db.paymentMethod.createMany({

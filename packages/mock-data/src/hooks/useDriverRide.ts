@@ -172,32 +172,127 @@ export const LIVE_LOCATION_REPORT_INTERVAL_MS = 3000;
  * proof the driver has reached pickup (see POST /api/driver/location's
  * arrival-confirmation check).
  */
-export function useReportLiveLocation(enabled: boolean) {
-  const [position, setPosition] = React.useState<{ lat: number; lng: number; heading: number | null } | null>(null);
+export type LiveLocationStatus = "idle" | "acquiring" | "live" | "denied" | "unavailable" | "unsupported";
+
+/** Hard ceiling on a one-shot fix, so callers can never await indefinitely. */
+const GET_FIX_TIMEOUT_MS = 10_000;
+
+function readPosition(pos: GeolocationPosition) {
+  const heading =
+    typeof pos.coords.heading === "number" && Number.isFinite(pos.coords.heading) ? pos.coords.heading : null;
+  const accuracy =
+    typeof pos.coords.accuracy === "number" && Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : undefined;
+  return { lat: pos.coords.latitude, lng: pos.coords.longitude, heading, accuracy };
+}
+
+function statusForError(error: GeolocationPositionError): LiveLocationStatus {
+  if (error.code === error.PERMISSION_DENIED) return "denied";
+  return "unavailable";
+}
+
+/**
+ * Obtain a single high-accuracy fix and hand it to the backend, à la the
+ * "share your location to go online" step every ride-hailing driver app has.
+ *
+ * The dashboard calls this *before* flipping the driver online. The matching
+ * loop only considers drivers whose `locationUpdatedAt` is fresher than
+ * LOCATION_STALE_MS (45s), so a driver who toggles online from a device that
+ * never reports a fix is stored as `isOnline: true` yet can never be matched to
+ * a ride - which is indistinguishable, from the driver's seat, from "the online
+ * toggle doesn't work".
+ *
+ * Rejects with the geolocation error (or an Error when unsupported) so the
+ * caller can explain the actual reason instead of failing silently.
+ */
+export async function acquireAndReportCurrentLocation() {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    throw new Error("This device doesn't support location.");
+  }
+  const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+    // Our own timer, not just the API's `timeout` option: some browsers never
+    // invoke either callback when no positioning provider is available, which
+    // would leave the caller awaiting forever.
+    const timer = setTimeout(() => reject(new Error("Getting your location timed out.")), GET_FIX_TIMEOUT_MS);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        clearTimeout(timer);
+        resolve(position);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+      { enableHighAccuracy: true, maximumAge: 10_000, timeout: GET_FIX_TIMEOUT_MS }
+    );
+  });
+  const fix = readPosition(pos);
+  await driverRideService.updateDriverLocation(fix.lat, fix.lng, fix.heading ?? undefined, fix.accuracy);
+  return { ...fix, accuracy: undefined as number | undefined };
+}
+
+/** Push an already-obtained fix to the backend, sparing a fresh GPS lock. */
+export async function reportLocationFix(fix: { lat: number; lng: number; heading: number | null }) {
+  await driverRideService.updateDriverLocation(fix.lat, fix.lng, fix.heading ?? undefined);
+}
+
+/**
+ * Watches the device's position and, while `report` is true, streams fixes to
+ * the backend - this is what keeps the driver inside the matcher's freshness
+ * window and moves their marker for the rider.
+ *
+ * The watch runs whenever `watch` is true, independently of `report`, so that
+ * (a) the permission prompt is resolved before the driver tries to go online,
+ * and (b) a position is already cached for the map. Crucially this hook also
+ * surfaces *why* tracking isn't working (denied / unavailable / unsupported):
+ * the silent `() => {}` error callback it used to have meant the UI happily
+ * displayed "Live location" while no fix was ever reaching the server.
+ */
+export function useReportLiveLocation(watch: boolean, report: boolean = watch, restartToken: number = 0) {
+  const [state, setState] = React.useState<{
+    position: { lat: number; lng: number; heading: number | null } | null;
+    status: LiveLocationStatus;
+    lastFixAt: number | null;
+  }>({ position: null, status: watch ? "acquiring" : "idle", lastFixAt: null });
   const lastSentRef = React.useRef(0);
+  const reportRef = React.useRef(report);
+  reportRef.current = report;
 
   React.useEffect(() => {
-    if (!enabled || typeof navigator === "undefined" || !navigator.geolocation) return;
+    if (!watch) {
+      setState((prev) => ({ ...prev, status: "idle" }));
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setState((prev) => ({ ...prev, status: "unsupported" }));
+      return;
+    }
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        const heading = typeof pos.coords.heading === "number" && Number.isFinite(pos.coords.heading) ? pos.coords.heading : null;
-        const accuracy =
-          typeof pos.coords.accuracy === "number" && Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : undefined;
-        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude, heading };
-        setPosition(next);
+        const fix = readPosition(pos);
+        setState({
+          position: { lat: fix.lat, lng: fix.lng, heading: fix.heading },
+          status: "live",
+          lastFixAt: Date.now(),
+        });
+        if (!reportRef.current) return;
         const now = Date.now();
         if (now - lastSentRef.current > LIVE_LOCATION_REPORT_INTERVAL_MS) {
           lastSentRef.current = now;
-          driverRideService.updateDriverLocation(next.lat, next.lng, heading ?? undefined, accuracy).catch(() => {});
+          driverRideService
+            .updateDriverLocation(fix.lat, fix.lng, fix.heading ?? undefined, fix.accuracy)
+            .catch(() => {});
         }
       },
-      () => {
-        // permission denied / unavailable — caller falls back to the last known DB location
+      (error) => {
+        setState((prev) => ({ ...prev, status: statusForError(error) }));
       },
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [enabled]);
+    // `restartToken` lets the caller tear down and re-establish the watch (e.g.
+    // a "retry location" button after the driver has fixed a blocked
+    // permission) — a fresh watchPosition is what re-queries permission state.
+  }, [watch, restartToken]);
 
-  return position;
+  return state;
 }
