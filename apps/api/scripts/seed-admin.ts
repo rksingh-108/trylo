@@ -9,7 +9,7 @@ import { hashPassword } from "../src/auth/password";
 
 async function main() {
   const email = process.env.ADMIN_EMAIL ?? "admin@trylo.dev";
-  const password = process.env.ADMIN_PASSWORD ?? "Admin123!";
+  const password = process.env.ADMIN_PASSWORD ?? "admin123";
   const name = process.env.ADMIN_NAME ?? "TRYLO Admin";
 
   const passwordHash = hashPassword(password);

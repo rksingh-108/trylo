@@ -63,10 +63,11 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 RUN groupadd --system --gid 1001 trylo \
-  && useradd --system --uid 1001 --gid trylo trylo
+  && useradd --system --uid 1001 --gid trylo -m trylo
 WORKDIR /repo
 COPY --from=installer --chown=trylo:trylo /repo .
 USER trylo
+ENV HOME=/home/trylo
 ENV NODE_ENV=production
 EXPOSE 4000
-CMD ["node", "apps/api/dist/index.js"]
+CMD ["sh", "-c", "./apps/api/node_modules/.bin/prisma migrate deploy --schema=apps/api/prisma/schema.prisma && node apps/api/dist/index.js"]
