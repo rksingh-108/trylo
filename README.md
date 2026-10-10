@@ -2,11 +2,11 @@
 
 A full-stack ride-booking platform — separate Customer, Driver, and Admin apps on a shared real-time backend, built as an independent engineering project.
 
-![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs) ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black) ![Express](https://img.shields.io/badge/Express-4-000000?logo=express) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white) ![Prisma](https://img.shields.io/badge/Prisma-6-2D3748?logo=prisma) ![Socket.IO](https://img.shields.io/badge/Socket.IO-4-black?logo=socketdotio) ![Docker](https://img.shields.io/badge/Docker-multi--stage-2496ED?logo=docker&logoColor=white) ![Azure](https://img.shields.io/badge/Azure-deployed-0078D4?logo=microsoftazure&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs) ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black) ![Express](https://img.shields.io/badge/Express-4-000000?logo=express) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white) ![Prisma](https://img.shields.io/badge/Prisma-6-2D3748?logo=prisma) ![Socket.IO](https://img.shields.io/badge/Socket.IO-4-black?logo=socketdotio) ![Docker](https://img.shields.io/badge/Docker-multi--stage-2496ED?logo=docker&logoColor=white)
+
+TRYLO is **not currently hosted** — there is no live deployment. It runs locally (see [💻 Local Development](#-local-development) and [🐳 Docker](#-docker)) and was validated end-to-end on real Android devices.
 
 ---
-
-
 
 ## 📱 Demo
 
@@ -144,9 +144,10 @@ flowchart TB
 | Routing | OSRM |
 | Geocoding | Nominatim / Photon |
 | Containerization | Docker (multi-stage build) |
-| Cloud | Azure Container Apps, Azure Static Web Apps, Azure Database for PostgreSQL (Flexible Server) |
-| CI/CD | GitHub Actions → GitHub Container Registry (ghcr.io) → Azure |
+| CI | GitHub Actions — monorepo build, typecheck, lint and tests (ephemeral PostgreSQL service container) |
 | Monorepo | Turborepo + pnpm workspaces |
+
+> **Note on the workflows still in this repo:** `.github/workflows/ci.yml` is the workflow that runs. The repository also still contains the Azure deploy pipelines (`api-deploy.yml`, `swa-customer.yml`, `swa-driver.yml`, `swa-admin.yml`) and the `azure/` PowerShell helper wrappers from when TRYLO was hosted on Azure — they are kept for reference but have nothing to deploy to any more.
 
 ---
 
@@ -237,98 +238,12 @@ Only non-secret environment variables are referenced by name here — actual val
 
 ---
 
-## ☁️ Azure Deployment
-
-Current live architecture, verified directly against the Azure subscription (`az resource list`) while writing this README:
-
-| Resource | Type | Region | Status |
-|---|---|---|---|
-| `trylo-api` | Azure Container Apps (Consumption, `minReplicas=0`/`maxReplicas=1`) | East Asia | Running (scale-to-zero when idle) |
-| `trylo-db` | Azure Database for PostgreSQL — Flexible Server, Burstable B1ms, PG16 | East Asia | Ready / running |
-| `trylo-customer`, `trylo-driver`, `trylo-admin` | Azure Static Web Apps (Free tier) | East Asia | Live |
-| `trylo-env` | Container Apps managed environment | East Asia | Succeeded |
-
-- **CI/CD:** GitHub Actions builds the API's Docker image and pushes it to **GitHub Container Registry** (`ghcr.io`), then updates the Azure Container App's image via `az containerapp update`. Each frontend is built as a static export and deployed straight to its Static Web App by its own workflow.
-- The Postgres server was confirmed **`Ready`** (running) at verification time — if you find it stopped later, it needs to be started (`az postgres flexible-server start`) before the API can serve real requests, since Container Apps' scale-to-zero doesn't affect the database's own running state.
-- This deployment exists to support a small, controlled real-device test — it is **not** a production rollout, and no autoscaling beyond a single API replica is configured (the matching loop and Socket.IO state are in-memory and single-instance by design).
-
----
-
-## Azure Test Environment — Start / Stop
-
-TRYLO's Azure deployment is a **test environment**, not a production service — it exists only to test the app on real devices. To avoid burning Azure for Students credit while it isn't being actively tested, [`scripts/azure-test-env.ps1`](scripts/azure-test-env.ps1) safely starts/stops the one resource that actually costs money while idle: the PostgreSQL Flexible Server.
-
-**Before testing:**
-```powershell
-.\scripts\azure-test-env.ps1 on
-```
-
-**Check current status (read-only, never modifies anything):**
-```powershell
-.\scripts\azure-test-env.ps1 status
-```
-
-**After testing:**
-```powershell
-.\scripts\azure-test-env.ps1 off
-```
-
-Optional:
-```powershell
-.\scripts\azure-test-env.ps1 restart   # restarts PostgreSQL
-```
-
-### Why only PostgreSQL
-
-| Resource | Costs while idle? | What the script does |
-|---|---|---|
-| PostgreSQL Flexible Server (`trylo-db`) | **Yes** — Burstable compute bills while running | Started/stopped explicitly by this script |
-| Container App (`trylo-api`) | No — `minReplicas=0`/`maxReplicas=1`, scales to zero automatically | Left untouched; scale settings are never modified |
-| Static Web Apps (`trylo-customer`/`driver`/`admin`) | No — Free tier | Left untouched |
-
-PostgreSQL should normally be **stopped after every testing session** (`... off`) — it's the only piece of this environment that keeps costing money just for sitting idle.
-
-### Azure limitation: auto-restart after 7 days
-
-Azure automatically restarts a stopped PostgreSQL Flexible Server after it has been stopped for **7 days** — Azure does not allow a flexible server to stay stopped indefinitely. If you leave the environment stopped for longer than that between testing sessions, don't be surprised to find PostgreSQL back in a `Ready` (running) state on its own — this is normal Azure behavior, not something this script caused. If that happens and you're not actively testing, just run:
-```powershell
-.\scripts\azure-test-env.ps1 off
-```
-again to stop it — `off` is idempotent and safe to run any time to confirm/enforce the stopped state.
-
-## ☁️ TRYLO Azure Controls
-
-For everyday use, [`azure/`](azure/) has double-click `.bat` wrappers around `scripts/azure-test-env.ps1` — no terminal needed.
-
-**Before testing** — double-click:
-```
-azure/start-trylo.bat
-```
-
-**After testing** — double-click:
-```
-azure/stop-trylo.bat
-```
-
-**Check status** (read-only) — double-click:
-```
-azure/status-trylo.bat
-```
-
-**Restart PostgreSQL** — double-click:
-```
-azure/restart-trylo.bat
-```
-
-These are convenience wrappers only — each one just calls `scripts/azure-test-env.ps1` (`on` / `off` / `status` / `restart`) and prints a clear banner around it. They contain no Azure logic of their own, work regardless of which folder they're launched from, and never modify PowerShell's execution policy permanently (each invocation uses `-ExecutionPolicy Bypass` for that single run only).
-
----
-
 ## ⚠️ Security & Testing Disclaimer
 
-TRYLO is an independent engineering/learning project. It has been deployed to Azure and tested with real devices in a small, controlled setting — **it is not presented as a production-scale ride-hailing platform**, and no claims are made about production readiness, scalability to many concurrent users, or commercial launch.
+TRYLO is an independent engineering/learning project. It runs locally (or in Docker) and has been tested with real devices in a small, controlled two-person setting — **it is not deployed or hosted anywhere**, **it is not presented as a production-scale ride-hailing platform**, and no claims are made about production readiness, scalability to many concurrent users, or commercial launch.
 
 Specifically, and honestly:
+- There is no live deployment: the environment TRYLO was previously hosted in has been taken down, so there is no public URL and nothing is currently running there.
 - OTP delivery is a development/testing mechanism (the OTP is returned in the API response), not integrated with a real SMS provider.
 - Payment settlement is handled entirely by an internal wallet system — there is no real money movement or external payment gateway.
 - The API intentionally runs as a single instance (in-memory Socket.IO state, in-process matching loop) and is not horizontally scaled.
@@ -344,7 +259,7 @@ Specifically, and honestly:
 - Keeping wallet settlement transaction-safe and idempotent with Prisma `$transaction`
 - Structuring a real Turborepo/pnpm monorepo across 4 apps and 4 shared packages
 - Building a multi-stage Docker image for a monorepo service using `turbo prune`
-- Deploying a full stack to Azure (Container Apps + Static Web Apps + managed Postgres) on a student budget, including scale-to-zero cost trade-offs
+- Operating a full stack on a student-budget cloud account — including scale-to-zero cold starts and eventually tearing the whole environment down to stop costs
 - Replacing a paid Google Maps dependency with an open-source stack (MapLibre/OpenFreeMap, OSRM, Nominatim/Photon)
 
 ---
