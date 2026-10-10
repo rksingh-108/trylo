@@ -6,20 +6,7 @@ A full-stack ride-booking platform — separate Customer, Driver, and Admin apps
 
 ---
 
-## 🚀 Live Demo
 
-All three apps and the API are currently deployed and were verified reachable at the time this README was written.
-
-| Application | Live URL |
-|---|---|
-| Customer App | [mango-bay-0d4fd7900.7.azurestaticapps.net](https://mango-bay-0d4fd7900.7.azurestaticapps.net) |
-| Driver App | [proud-hill-0c5e90200.7.azurestaticapps.net](https://proud-hill-0c5e90200.7.azurestaticapps.net) |
-| Admin Panel | [lively-pebble-0a7371300.7.azurestaticapps.net](https://lively-pebble-0a7371300.7.azurestaticapps.net) |
-| API Health Check | [trylo-api.kindpond-9e954784.eastasia.azurecontainerapps.io/health](https://trylo-api.kindpond-9e954784.eastasia.azurecontainerapps.io/health) |
-
-> **Note on cold starts:** the API runs on Azure Container Apps with `minReplicas: 0` (scale-to-zero to control cost). If it's been idle, the first request can take **15–25 seconds** while a new replica spins up — this was observed directly (a health-check request took ~25s cold). Subsequent requests are fast. This is a deliberate cost trade-off for a personal project, not a performance bug.
-
----
 
 ## 📱 Demo
 
